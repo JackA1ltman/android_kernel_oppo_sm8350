@@ -41,3 +41,5 @@ obj-$(CONFIG_OPLUS_HEALTHINFO)	+= healthinfo/
 #endif /* OPLUS_FEATURE_HEALTHINFO */
 
 obj-$(CONFIG_OPLUS_FEATURE_CPU_JANKINFO)	+= sched_info/
+
+proc-$(CONFIG_BOOT_CONFIG)	+= bootconfig.o
