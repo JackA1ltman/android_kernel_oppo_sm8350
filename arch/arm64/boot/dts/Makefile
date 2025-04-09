@@ -29,7 +29,7 @@
 #subdir-y += xilinx
 #subdir-y += zte
 #endif/*VENDOR_EDIT*/
-subdir-y += qcom
+#subdir-y += qcom
 dtstree	:= $(srctree)/$(src)
 vendor  := $(dtstree)/vendor
 ifneq "$(wildcard $(vendor)/Makefile)" ""
