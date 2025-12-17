@@ -263,9 +263,8 @@ static int sde_backlight_device_update_status(struct backlight_device *bd)
 			if ((MSM_BOOT_MODE_FACTORY != get_boot_mode()) && (is_spread_backlight(display, bl_lvl)) && !dc_apollo_sync_hbmon(display)) {
 			//#endif
 				if (display->panel->oplus_priv.dc_apollo_sync_enable) {
-					if ((display->panel->bl_config.bl_level >= display->panel->oplus_priv.sync_brightness_level
-						&& display->panel->bl_config.bl_level < display->panel->oplus_priv.dc_apollo_sync_brightness_level)
-						|| display->panel->bl_config.bl_level == 4) {
+					if (display->panel->bl_config.bl_level >= display->panel->oplus_priv.sync_brightness_level
+						&& display->panel->bl_config.bl_level < display->panel->oplus_priv.dc_apollo_sync_brightness_level) {
 						if (bl_lvl == display->panel->oplus_priv.dc_apollo_sync_brightness_level
 							/*&& dc_apollo_enable*/
 							&& dc_apollo.pcc_last >= display->panel->oplus_priv.dc_apollo_sync_brightness_level_pcc) {
@@ -274,23 +273,30 @@ static int sde_backlight_device_update_status(struct backlight_device *bd)
 								pr_err("dc wait timeout\n");
 							}
 							else {
-								oplus_backlight_wait_vsync(c_conn->encoder);
+								//oplus_backlight_wait_vsync(c_conn->encoder);
 							}
 							dc_apollo.dc_pcc_updated = 0;
 						}
-					}
-					else if (display->panel->bl_config.bl_level < display->panel->oplus_priv.sync_brightness_level
+					} else if (display->panel->bl_config.bl_level < display->panel->oplus_priv.sync_brightness_level
 							&& display->panel->bl_config.bl_level > 4) {
 						if (bl_lvl == display->panel->oplus_priv.dc_apollo_sync_brightness_level
 							/*&& dc_apollo_enable*/
 							&& dc_apollo.pcc_last >= display->panel->oplus_priv.dc_apollo_sync_brightness_level_pcc_min) {
+							#ifndef OPLUS_BUG_STABILITY
 							rc = wait_event_timeout(dc_apollo.bk_wait, dc_apollo.dc_pcc_updated, msecs_to_jiffies(17));
 							if (!rc) {
 								pr_err("dc wait timeout\n");
 							}
 							else {
-								oplus_backlight_wait_vsync(c_conn->encoder);
+								//oplus_backlight_wait_vsync(c_conn->encoder);
 							}
+							#endif
+							dc_apollo.dc_pcc_updated = 0;
+						}
+					} else if (display->panel->bl_config.bl_level == 4) {
+						if (bl_lvl == display->panel->oplus_priv.dc_apollo_sync_brightness_level
+							/*&& dc_apollo_enable*/
+							&& dc_apollo.pcc_last >= display->panel->oplus_priv.dc_apollo_sync_brightness_level_pcc) {
 							dc_apollo.dc_pcc_updated = 0;
 						}
 					}
@@ -298,6 +304,9 @@ static int sde_backlight_device_update_status(struct backlight_device *bd)
 				spin_lock(&g_bk_lock);
 				update_pending_backlight(display, bl_lvl);
 				spin_unlock(&g_bk_lock);
+				rc = c_conn->ops.set_backlight(&c_conn->base,
+				c_conn->display, bl_lvl);
+				c_conn->unset_bl_level = 0;
 			} else {
 				spin_lock(&g_bk_lock);
 				update_pending_backlight(display, bl_lvl);

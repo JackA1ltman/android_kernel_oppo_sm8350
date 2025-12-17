@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
  */
 
 #include <linux/kernel.h>
@@ -14,6 +14,24 @@
 
 #define VALIDATE_VOLTAGE(min, max, config_val) ((config_val) && \
 	(config_val >= min) && (config_val <= max))
+
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+typedef enum {
+       EXT_NONE=-1,
+       EXT_LDO1,
+       EXT_LDO2,
+       EXT_LDO3,
+       EXT_LDO4,
+       EXT_LDO5,
+       EXT_LDO6,
+       EXT_LDO7,
+       EXT_MAX
+} EXT_SELECT;
+
+extern int wl2868c_check_ldo_status(void);
+extern int wl2868c_ldo_enable(EXT_SELECT ldonum,unsigned int value);
+extern int wl2868c_ldo_disable(EXT_SELECT ldonum,unsigned int value);
+#endif
 
 static struct i2c_settings_list*
 	cam_sensor_get_i2c_ptr(struct i2c_settings_array *i2c_reg_settings,
@@ -59,6 +77,27 @@ int32_t cam_sensor_util_get_current_qtimer_ns(uint64_t *qtime_ns)
 	} else {
 		CAM_ERR(CAM_SENSOR, "NULL pointer passed");
 		return -EINVAL;
+	}
+
+	return rc;
+}
+
+int32_t cam_sensor_util_regulator_powerup(struct cam_hw_soc_info *soc_info)
+{
+	int32_t i, rc = 0;
+	/* Initialize regulators to default parameters */
+	for (i = 0; i < soc_info->num_rgltr; i++) {
+		soc_info->rgltr[i] = devm_regulator_get(soc_info->dev,
+					soc_info->rgltr_name[i]);
+		if (IS_ERR_OR_NULL(soc_info->rgltr[i])) {
+			rc = PTR_ERR(soc_info->rgltr[i]);
+			rc = rc ? rc : -EINVAL;
+			CAM_ERR(CAM_ACTUATOR, "get failed for regulator %s %d",
+				 soc_info->rgltr_name[i], rc);
+			return rc;
+		}
+		CAM_DBG(CAM_ACTUATOR, "get for regulator %s",
+			soc_info->rgltr_name[i]);
 	}
 
 	return rc;
@@ -1974,12 +2013,6 @@ static int cam_config_mclk_reg(struct cam_sensor_power_ctrl_t *ctrl,
 
 				ps->data[0] =
 					soc_info->rgltr[j];
-#ifndef OPLUS_FEATURE_CAMERA_COMMON
-				regulator_put(
-					soc_info->rgltr[j]);
-				soc_info->rgltr[j] = NULL;
-#endif
-
 			}
 		}
 	}
@@ -2059,12 +2092,6 @@ int cam_sensor_core_power_up(struct cam_sensor_power_ctrl_t *ctrl,
 					CAM_DBG(CAM_SENSOR,
 						"Enable cam_clk: %d", j);
 
-#ifndef OPLUS_FEATURE_CAMERA_COMMON
-					soc_info->rgltr[j] =
-					regulator_get(
-						soc_info->dev,
-						soc_info->rgltr_name[j]);
-#endif
 					if (IS_ERR_OR_NULL(
 						soc_info->rgltr[j])) {
 						rc = PTR_ERR(
@@ -2101,7 +2128,8 @@ int cam_sensor_core_power_up(struct cam_sensor_power_ctrl_t *ctrl,
 			for (j = 0; j < soc_info->num_clk; j++) {
 				rc = cam_soc_util_clk_enable(soc_info->clk[j],
 					soc_info->clk_name[j],
-					soc_info->clk_rate[0][j]);
+					soc_info->clk_rate[0][j],
+					NULL);
 				if (rc)
 					break;
 			}
@@ -2158,12 +2186,6 @@ int cam_sensor_core_power_up(struct cam_sensor_power_ctrl_t *ctrl,
 				CAM_DBG(CAM_SENSOR, "Enable Regulator");
 				vreg_idx = power_setting->seq_val;
 
-#ifndef OPLUS_FEATURE_CAMERA_COMMON
-				soc_info->rgltr[vreg_idx] =
-					regulator_get(soc_info->dev,
-						soc_info->rgltr_name[vreg_idx]);
-#endif
-
 				if (IS_ERR_OR_NULL(
 					soc_info->rgltr[vreg_idx])) {
 					rc = PTR_ERR(soc_info->rgltr[vreg_idx]);
@@ -2206,6 +2228,34 @@ int cam_sensor_core_power_up(struct cam_sensor_power_ctrl_t *ctrl,
 				goto power_up_failed;
 			}
 			break;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+		case SENSOR_EXT_L1:
+		case SENSOR_EXT_L2:
+		case SENSOR_EXT_L3:
+		case SENSOR_EXT_L4:
+		case SENSOR_EXT_L5:
+		case SENSOR_EXT_L6:
+		case SENSOR_EXT_L7:
+			if ((power_setting->seq_type - SENSOR_EXT_L1) >= 0 && (power_setting->seq_type - SENSOR_EXT_L1) <= 6)
+			{
+				if (true == wl2868c_check_ldo_status())
+				{
+					wl2868c_ldo_enable(power_setting->seq_type - SENSOR_EXT_L1 , power_setting->config_val);
+					CAM_INFO(CAM_SENSOR, "wl2868c seq type %d seq val %d config value %d ",
+						power_setting->seq_type, power_setting->seq_val, power_setting->config_val);
+				}
+				else
+				{
+					CAM_INFO(CAM_SENSOR, "wl2868c error status seq type %d seq val %d config value %d",
+						power_setting->seq_type, power_setting->seq_val, power_setting->config_val);
+				}
+			}
+			else
+			{
+				CAM_ERR(CAM_SENSOR, "error user_cnt overflow  power seq type %d",power_setting->seq_type);
+			}
+			break;
+#endif
 		default:
 			CAM_ERR(CAM_SENSOR, "error power seq type %d",
 				power_setting->seq_type);
@@ -2286,10 +2336,6 @@ power_up_failed:
 				power_setting->data[0] =
 						soc_info->rgltr[vreg_idx];
 
-#ifndef OPLUS_FEATURE_CAMERA_COMMON
-				regulator_put(soc_info->rgltr[vreg_idx]);
-				soc_info->rgltr[vreg_idx] = NULL;
-#endif
 			} else {
 				CAM_ERR(CAM_SENSOR, "seq_val:%d > num_vreg: %d",
 					power_setting->seq_val, num_vreg);
@@ -2407,6 +2453,10 @@ int cam_sensor_util_power_down(struct cam_sensor_power_ctrl_t *ctrl,
 		case SENSOR_CUSTOM_GPIO1:
 		case SENSOR_CUSTOM_GPIO2:
 
+			if (!gpio_num_info) {
+				CAM_ERR(CAM_SENSOR, "failed: No gpio");
+				continue;
+			}
 			if (!gpio_num_info->valid[pd->seq_type])
 				continue;
 
@@ -2456,12 +2506,6 @@ int cam_sensor_util_power_down(struct cam_sensor_power_ctrl_t *ctrl,
 					}
 					ps->data[0] =
 						soc_info->rgltr[ps->seq_val];
-#ifndef OPLUS_FEATURE_CAMERA_COMMON
-					regulator_put(
-						soc_info->rgltr[ps->seq_val]);
-					soc_info->rgltr[ps->seq_val] = NULL;
-#endif
-
 				} else {
 					CAM_ERR(CAM_SENSOR,
 						"seq_val:%d > num_vreg: %d",
@@ -2479,6 +2523,32 @@ int cam_sensor_util_power_down(struct cam_sensor_power_ctrl_t *ctrl,
 				CAM_ERR(CAM_SENSOR,
 					"Error disabling VREG GPIO");
 			break;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+		case SENSOR_EXT_L1:
+		case SENSOR_EXT_L2:
+		case SENSOR_EXT_L3:
+		case SENSOR_EXT_L4:
+		case SENSOR_EXT_L5:
+		case SENSOR_EXT_L6:
+		case SENSOR_EXT_L7:
+			if ((pd->seq_type - SENSOR_EXT_L1) >= 0 && (pd->seq_type - SENSOR_EXT_L1) <= 6)
+			{
+				if (true == wl2868c_check_ldo_status())
+				{
+					CAM_INFO(CAM_SENSOR, "wl2868c disable seq type %d", pd->seq_type);
+					wl2868c_ldo_disable(pd->seq_type - SENSOR_EXT_L1, 0);
+				}
+				else
+				{
+					CAM_ERR(CAM_SENSOR, "wl2868c ERROR status");
+				}
+			}
+			else
+			{
+				CAM_ERR(CAM_SENSOR, "error cnt overflow seq type %d",pd->seq_type);
+			}
+			break;
+#endif
 		default:
 			CAM_ERR(CAM_SENSOR, "error power seq type %d",
 				pd->seq_type);

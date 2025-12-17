@@ -297,7 +297,11 @@ void sde_setup_dspp_pccv4(struct sde_hw_dspp *ctx, void *cfg)
 				pr_err("pcc(%d,%d)\n", dc_apollo.pcc_current, dc_apollo.pcc_last);
 				if (dc_apollo.pcc_last != dc_apollo.pcc_current) {
 					dc_apollo.pcc_last = dc_apollo.pcc_current;
-					dc_apollo.dc_pcc_updated = 1;
+					if (hw_cfg->payload != NULL) {
+						dc_apollo.dc_pcc_updated = 1;
+					} else {
+						dc_apollo.dc_pcc_updated = 0;
+					}
 				}
 			}
 			pcc_cfg_last = pcc_cfg;

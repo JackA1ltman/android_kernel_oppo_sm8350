@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
  */
 
 #include <linux/of.h>
@@ -72,6 +72,12 @@ static int32_t cam_get_source_node_info(
 
 	soc_private->is_wled_flash =
 		of_property_read_bool(of_node, "wled-flash-support");
+
+	rc = of_property_read_u32(of_node, "flash-type", &soc_private->flash_type);
+	if (rc) {
+		CAM_ERR(CAM_FLASH,
+			"flash-type read failed rc=%d", rc);
+	}
 
 	switch_src_node = of_parse_phandle(of_node, "switch-source", 0);
 	if (!switch_src_node) {
@@ -304,6 +310,22 @@ int cam_flash_get_dt_data(struct cam_flash_ctrl *fctrl,
 		&fctrl->flash_current);
 	if (rc < 0) {
 		pr_err("get flash_current failed rc %d\n", rc);
+	}
+	/*Add by MuMinghao @ Camera 2024/07/23 for torch*/
+	fctrl->flash_level_num = of_property_count_u32_elems(of_node,
+		"qcom,flash-level-current");
+	if (fctrl->flash_level_num < 0){
+		pr_err("get flash_level_num failed rc %d\n",
+			fctrl->flash_level_num);
+	} else if (fctrl->flash_level_num > MAX_TORCH_STRENGTH_LEVEL){
+		pr_err("flash_level_num is greater than max level rc %d\n",
+			fctrl->flash_level_num);
+		fctrl->flash_level_num = MAX_TORCH_STRENGTH_LEVEL;
+	}
+	rc = of_property_read_u32_array(of_node, "qcom,flash-level-current",
+		fctrl->flash_level_current, fctrl->flash_level_num);
+	if (rc < 0){
+		pr_err("get flash_level_current failed rc %d\n", rc);
 	}
 #endif
 	rc = cam_get_source_node_info(of_node, fctrl, soc_info->soc_private);

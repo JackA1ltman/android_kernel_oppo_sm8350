@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/module.h>
@@ -112,6 +113,13 @@ static int cam_lrme_mgr_util_packet_validate(struct cam_packet *packet,
 		CAM_ERR(CAM_LRME, "no io configs");
 		return -EINVAL;
 	}
+
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	if (!packet->num_cmd_buf) {
+		CAM_ERR(CAM_LRME, "no cmd bufs");
+		return -EINVAL;
+	}
+#endif
 
 	cmd_desc = (struct cam_cmd_buf_desc *)((uint8_t *)&packet->payload +
 		packet->cmd_buf_offset);
@@ -422,7 +430,11 @@ static int cam_lrme_mgr_util_submit_req(void *priv, void *data)
 		if (rc == -EBUSY)
 			CAM_DBG(CAM_LRME, "device busy");
 		else if (rc)
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+			CAM_ERR(CAM_LRME, "submit request %llu failed rc %d", frame_req->req_id, rc);
+#else
 			CAM_ERR(CAM_LRME, "submit request failed rc %d", rc);
+#endif
 		if (rc) {
 			req_prio == 0 ? spin_lock(&hw_device->high_req_lock) :
 				spin_lock(&hw_device->normal_req_lock);
@@ -480,7 +492,9 @@ static int cam_lrme_mgr_util_release(struct cam_lrme_hw_mgr *hw_mgr,
 {
 	int rc = 0;
 	struct cam_lrme_device *hw_device;
-
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	struct cam_lrme_frame_request *frame_req;
+#endif
 	rc = cam_lrme_mgr_util_get_device(hw_mgr, device_index, &hw_device);
 	if (rc) {
 		CAM_ERR(CAM_LRME, "Error in getting device %d", rc);
@@ -491,6 +505,29 @@ static int cam_lrme_mgr_util_release(struct cam_lrme_hw_mgr *hw_mgr,
 	hw_device->num_context--;
 	mutex_unlock(&hw_mgr->hw_mgr_mutex);
 
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	if (hw_device->num_context == 0) {
+		do {
+			frame_req = NULL;
+			cam_lrme_mgr_util_get_frame_req(
+					&hw_device->frame_pending_list_high, &frame_req,
+					&hw_device->high_req_lock);
+			if (frame_req) {
+				CAM_ERR(CAM_LRME, "frame req %llu", frame_req->req_id);
+			}
+		} while(frame_req);
+
+		do {
+			frame_req = NULL;
+			cam_lrme_mgr_util_get_frame_req(
+					&hw_device->frame_pending_list_normal, &frame_req,
+					&hw_device->normal_req_lock);
+			if (frame_req) {
+				CAM_ERR(CAM_LRME, "frame req %llu", frame_req->req_id);
+			}
+		} while(frame_req);
+	}
+#endif
 	return rc;
 }
 
@@ -696,6 +733,53 @@ static int cam_lrme_mgr_hw_dump(void *hw_mgr_priv, void *hw_dump_args)
 	dump_args->offset = lrme_dump_args.offset;
 	return rc;
 }
+
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+static int cam_lrme_mgr_hw_close(void *hw_mgr_priv, void *hw_close_args)
+{
+	struct cam_lrme_device *hw_device;
+	struct cam_lrme_frame_request *frame_req;
+	struct list_head *pos, *tmp;
+	int cnt = 0;
+
+	CAM_ERR(CAM_LRME, "eeeee");
+	if ((CAM_LRME_HW_MAX != 1) || (g_lrme_hw_mgr.device_count != 1)) {
+		CAM_ERR(CAM_LRME, "CAM_LRME_HW_MAX=%d, device_count=%d", CAM_LRME_HW_MAX, g_lrme_hw_mgr.device_count);
+		return 0;
+	}
+
+	hw_device = &g_lrme_hw_mgr.hw_device[0];
+
+	do {
+		frame_req = NULL;
+		cam_lrme_mgr_util_get_frame_req(
+			&hw_device->frame_pending_list_high, &frame_req,
+			&hw_device->high_req_lock);
+		if (frame_req) {
+			CAM_ERR(CAM_LRME, "frame req %llu", frame_req->req_id);
+		}
+	} while(frame_req);
+
+	do {
+		frame_req = NULL;
+		cam_lrme_mgr_util_get_frame_req(
+			&hw_device->frame_pending_list_normal, &frame_req,
+			&hw_device->normal_req_lock);
+		if (frame_req) {
+			CAM_ERR(CAM_LRME, "frame req %llu", frame_req->req_id);
+	    }
+	} while(frame_req);
+
+	spin_lock(&g_lrme_hw_mgr.free_req_lock);
+	list_for_each_safe(pos, tmp, &g_lrme_hw_mgr.frame_free_list) {
+		cnt++;
+	}
+	spin_unlock(&g_lrme_hw_mgr.free_req_lock);
+	CAM_ERR(CAM_LRME, "frame_free_list size=%d need=%d", cnt, CAM_CTX_REQ_MAX * CAM_CTX_MAX);
+	CAM_ERR(CAM_LRME, "xxxxx");
+	return 0;
+}
+#endif
 
 static int cam_lrme_mgr_hw_flush(void *hw_mgr_priv, void *hw_flush_args)
 {	int rc = 0, i;
@@ -1197,7 +1281,11 @@ int cam_lrme_hw_mgr_init(struct cam_hw_mgr_intf *hw_mgr_intf,
 	hw_mgr_intf->hw_config = cam_lrme_mgr_hw_config;
 	hw_mgr_intf->hw_read = NULL;
 	hw_mgr_intf->hw_write = NULL;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	hw_mgr_intf->hw_close = cam_lrme_mgr_hw_close;
+#else
 	hw_mgr_intf->hw_close = NULL;
+#endif
 	hw_mgr_intf->hw_flush = cam_lrme_mgr_hw_flush;
 
 	g_lrme_hw_mgr.event_cb = cam_lrme_dev_buf_done_cb;

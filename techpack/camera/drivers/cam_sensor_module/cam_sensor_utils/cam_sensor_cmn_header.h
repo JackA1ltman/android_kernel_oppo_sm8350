@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
  */
 
 #ifndef _CAM_SENSOR_CMN_HEADER_
@@ -143,6 +143,15 @@ enum msm_camera_power_seq_type {
 	SENSOR_CUSTOM_GPIO1,
 	SENSOR_CUSTOM_GPIO2,
 	SENSOR_VANA1,
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	SENSOR_EXT_L1,
+	SENSOR_EXT_L2,
+	SENSOR_EXT_L3,
+	SENSOR_EXT_L4,
+	SENSOR_EXT_L5,
+	SENSOR_EXT_L6,
+	SENSOR_EXT_L7,
+#endif
 	SENSOR_SEQ_TYPE_MAX,
 };
 
@@ -360,6 +369,12 @@ enum msm_sensor_camera_id_t {
 	CAMERA_7,
 	CAMERA_8,
 	CAMERA_9,
+	CAMERA_10,
+	CAMERA_11,
+	CAMERA_12,
+	CAMERA_13,
+	CAMERA_14,
+	CAMERA_15,
 	MAX_CAMERAS,
 };
 

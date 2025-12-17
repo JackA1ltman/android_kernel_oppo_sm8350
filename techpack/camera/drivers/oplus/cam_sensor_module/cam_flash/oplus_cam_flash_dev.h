@@ -31,6 +31,12 @@
 #include "cam_context.h"
 
 #ifdef OPLUS_FEATURE_CAMERA_COMMON
+/*Add by MuMinghao @ Camera 2024/07/23 for torch*/
+#define FLASH_ON_LEVEL1 6
+#define FLASH_ON_LEVEL2 7
+#define FLASH_ON_LEVEL3 8
+#define FLASH_ON_LEVEL4 9
+
 void oplus_cam_flash_proc_init(struct cam_flash_ctrl *flash_ctl, struct platform_device *pdev);
 int cam_flash_on(struct cam_flash_ctrl *flash_ctrl,
 	struct cam_flash_frame_setting *flash_data,

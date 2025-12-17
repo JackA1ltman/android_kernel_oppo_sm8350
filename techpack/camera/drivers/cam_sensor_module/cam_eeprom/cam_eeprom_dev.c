@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
  */
 
 #include "cam_eeprom_dev.h"
@@ -10,31 +10,12 @@
 #include "cam_debug_util.h"
 #include "camera_main.h"
 #ifdef OPLUS_FEATURE_CAMERA_COMMON
+#include "cam_compat.h"
+static bool gProbe_done;
 extern bool chip_version_old;
 #endif
 
-static long cam_eeprom_subdev_ioctl(struct v4l2_subdev *sd,
-	unsigned int cmd, void *arg)
-{
-	int                       rc     = 0;
-	struct cam_eeprom_ctrl_t *e_ctrl = v4l2_get_subdevdata(sd);
-
-	switch (cmd) {
-	case VIDIOC_CAM_CONTROL:
-		rc = cam_eeprom_driver_cmd(e_ctrl, arg);
-		if (rc)
-			CAM_ERR(CAM_EEPROM,
-				"Failed in Driver cmd: %d", rc);
-		break;
-	default:
-		rc = -ENOIOCTLCMD;
-		break;
-	}
-
-	return rc;
-}
-
-static int cam_eeprom_subdev_close(struct v4l2_subdev *sd,
+static int cam_eeprom_subdev_close_internal(struct v4l2_subdev *sd,
 	struct v4l2_subdev_fh *fh)
 {
 	struct cam_eeprom_ctrl_t *e_ctrl =
@@ -50,6 +31,48 @@ static int cam_eeprom_subdev_close(struct v4l2_subdev *sd,
 	mutex_unlock(&(e_ctrl->eeprom_mutex));
 
 	return 0;
+}
+
+static int cam_eeprom_subdev_close(struct v4l2_subdev *sd,
+	struct v4l2_subdev_fh *fh)
+{
+	bool crm_active = cam_req_mgr_is_open(CAM_EEPROM);
+
+	if (crm_active) {
+		CAM_DBG(CAM_EEPROM, "CRM is ACTIVE, close should be from CRM");
+		return 0;
+	}
+
+	return cam_eeprom_subdev_close_internal(sd, fh);
+}
+
+static long cam_eeprom_subdev_ioctl(struct v4l2_subdev *sd,
+	unsigned int cmd, void *arg)
+{
+	int                       rc     = 0;
+	struct cam_eeprom_ctrl_t *e_ctrl = v4l2_get_subdevdata(sd);
+
+	switch (cmd) {
+	case VIDIOC_CAM_CONTROL:
+		rc = cam_eeprom_driver_cmd(e_ctrl, arg);
+		if (rc)
+			CAM_ERR(CAM_EEPROM,
+				"Failed in Driver cmd: %d", rc);
+		break;
+	case CAM_SD_SHUTDOWN:
+		if (!cam_req_mgr_is_shutdown()) {
+			CAM_ERR(CAM_CORE, "SD shouldn't come from user space");
+			return 0;
+		}
+
+		rc = cam_eeprom_subdev_close_internal(sd, NULL);
+		break;
+	default:
+		rc = -ENOIOCTLCMD;
+		break;
+	}
+
+	return rc;
 }
 
 int32_t cam_eeprom_update_i2c_info(struct cam_eeprom_ctrl_t *e_ctrl,
@@ -158,6 +181,7 @@ static int cam_eeprom_init_subdev(struct cam_eeprom_ctrl_t *e_ctrl)
 		(V4L2_SUBDEV_FL_HAS_DEVNODE | V4L2_SUBDEV_FL_HAS_EVENTS);
 	e_ctrl->v4l2_dev_str.ent_function = CAM_EEPROM_DEVICE_TYPE;
 	e_ctrl->v4l2_dev_str.token = e_ctrl;
+	e_ctrl->v4l2_dev_str.close_seq_prior = CAM_SD_CLOSE_MEDIUM_PRIORITY;
 
 	rc = cam_register_subdev(&(e_ctrl->v4l2_dev_str));
 	if (rc)
@@ -537,7 +561,7 @@ static void cam_eeprom_component_unbind(struct device *dev,
 	kfree(soc_info->soc_private);
 	kfree(e_ctrl->io_master_info.cci_client);
 #ifdef OPLUS_FEATURE_CAMERA_COMMON
-        kfree(e_ctrl->io_master_info_ois.cci_client);
+        kfree(e_ctrl->io_master_info.cci_client);
 #endif
 	platform_set_drvdata(pdev, NULL);
 	v4l2_set_subdevdata(&e_ctrl->v4l2_dev_str.sd, NULL);
@@ -559,6 +583,9 @@ static int32_t cam_eeprom_platform_driver_probe(
 	if (rc)
 		CAM_ERR(CAM_EEPROM, "failed to add component rc: %d", rc);
 
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	gProbe_done = true;
+#endif
 	return rc;
 }
 
@@ -614,6 +641,10 @@ int cam_eeprom_driver_init(void)
 {
 	int rc = 0;
 
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	void *drv_ptr = NULL;
+	gProbe_done = false;
+#endif
 	rc = platform_driver_register(&cam_eeprom_platform_driver);
 	if (rc < 0) {
 		CAM_ERR(CAM_EEPROM, "platform_driver_register failed rc = %d",
@@ -633,6 +664,13 @@ int cam_eeprom_driver_init(void)
 		return rc;
 	}
 
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	if (gProbe_done == false) {
+		CAM_ERR(CAM_SENSOR, "%s deferred probe", cam_eeprom_platform_driver.driver.name);
+		drv_ptr = (void*)&(cam_eeprom_platform_driver.driver);
+		dev_defer_supplier_debug(drv_ptr);
+	}
+#endif
 	return rc;
 }
 

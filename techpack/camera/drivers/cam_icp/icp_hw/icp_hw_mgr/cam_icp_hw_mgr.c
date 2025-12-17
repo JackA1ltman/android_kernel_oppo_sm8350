@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
  */
 
 #include <linux/uaccess.h>
@@ -1068,8 +1068,7 @@ static bool cam_icp_update_clk_free(struct cam_icp_hw_mgr *hw_mgr,
 
 static bool cam_icp_debug_clk_update(struct cam_icp_clk_info *hw_mgr_clk_info)
 {
-	if (icp_hw_mgr.icp_debug_clk < ICP_CLK_TURBO_HZ &&
-		icp_hw_mgr.icp_debug_clk &&
+	if (icp_hw_mgr.icp_debug_clk &&
 		icp_hw_mgr.icp_debug_clk != hw_mgr_clk_info->curr_clk) {
 		hw_mgr_clk_info->base_clk = icp_hw_mgr.icp_debug_clk;
 		hw_mgr_clk_info->curr_clk = icp_hw_mgr.icp_debug_clk;
@@ -4206,13 +4205,21 @@ static int cam_icp_mgr_pkt_validation(struct cam_packet *packet)
 		return -EINVAL;
 	}
 
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	if (!packet->num_io_configs || packet->num_io_configs > IPE_IO_IMAGES_MAX) {
+#else
 	if (packet->num_io_configs > IPE_IO_IMAGES_MAX) {
+#endif
 		CAM_ERR(CAM_ICP, "Invalid number of io configs: %d %d",
 			IPE_IO_IMAGES_MAX, packet->num_io_configs);
 		return -EINVAL;
 	}
 
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	if (!packet->num_cmd_buf || packet->num_cmd_buf > CAM_ICP_CTX_MAX_CMD_BUFFERS) {
+#else
 	if (packet->num_cmd_buf > CAM_ICP_CTX_MAX_CMD_BUFFERS) {
+#endif
 		CAM_ERR(CAM_ICP, "Invalid number of cmd buffers: %d %d",
 			CAM_ICP_CTX_MAX_CMD_BUFFERS, packet->num_cmd_buf);
 		return -EINVAL;
@@ -5746,7 +5753,7 @@ static int cam_icp_mgr_acquire_hw(void *hw_mgr_priv, void *acquire_hw_args)
 	args->hw_mgr_ctx_id = ctx_data->ctx_id;
 
 	snprintf(ctx_data->ctx_id_string, sizeof(ctx_data->ctx_id_string),
-		"%s_ctx[%u]_hwmgrctx[%u]_Submit",
+		"%s_ctx[%d]_hwmgrctx[%d]_Submit",
 		cam_icp_dev_type_to_name(
 		ctx_data->icp_dev_acquire_info->dev_type),
 		args->ctx_id,

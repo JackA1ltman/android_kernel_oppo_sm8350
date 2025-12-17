@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2014-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2021, The Linux Foundation. All rights reserved.
  */
 
 #include <linux/dma-mapping.h>
@@ -201,6 +201,7 @@ int camera_component_match_add_drivers(struct device *master_dev,
 {
 	int i, rc = 0;
 	struct platform_device *pdev = NULL;
+	struct device *start_dev = NULL, *match_dev = NULL;
 
 	if (!master_dev || !match_list) {
 		CAM_ERR(CAM_UTIL, "Invalid parameters for component match add");
@@ -217,14 +218,12 @@ int camera_component_match_add_drivers(struct device *master_dev,
 		struct device_driver *drv = &cam_component_drivers[i]->driver;
 		void *drv_ptr = (void *)drv;
 #endif
-		struct device *start_dev = NULL, *match_dev;
-
+		start_dev = NULL;
 		while ((match_dev = bus_find_device(&platform_bus_type,
 			start_dev, drv_ptr, &camera_platform_compare_dev))) {
 			put_device(start_dev);
 			pdev = to_platform_device(match_dev);
-			CAM_DBG(CAM_UTIL, "Adding matched component:%s",
-				pdev->name);
+			CAM_DBG(CAM_UTIL, "Adding matched component:%s", pdev->name);
 			component_match_add(master_dev, match_list,
 				camera_component_compare_dev, match_dev);
 			start_dev = match_dev;
@@ -235,3 +234,25 @@ int camera_component_match_add_drivers(struct device *master_dev,
 end:
 	return rc;
 }
+
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+void dev_defer_supplier_debug(void *drv_ptr)
+{
+	struct device *match_dev = NULL;
+	match_dev = bus_find_device(&platform_bus_type, NULL, drv_ptr, &camera_platform_compare_dev);
+	if (match_dev) {
+		struct device_link *link;
+		list_for_each_entry(link, &match_dev->links.suppliers, c_node) {
+			if (!(link->flags & DL_FLAG_MANAGED))
+				continue;
+
+			if (link->status != DL_STATE_AVAILABLE &&
+					!(link->flags & DL_FLAG_SYNC_STATE_ONLY)) {
+				dev_err(match_dev, "probe deferral - supplier %s not ready\n",
+						dev_name(link->supplier));
+			}
+		}
+	}
+	put_device(match_dev);
+}
+#endif

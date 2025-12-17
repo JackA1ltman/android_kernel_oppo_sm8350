@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
  */
 
 #include "cam_cci_dev.h"
@@ -27,9 +27,9 @@ struct v4l2_subdev *cam_cci_get_subdev(int cci_dev_index)
 
 	return sub_device;
 }
-//ifdef OPLUS_FEATURE_EXPLORER_AON
+// ifdef OPLUS_FEATURE_EXPLORER_AON
 EXPORT_SYMBOL(cam_cci_get_subdev);
-//endif
+// endif
 
 static long cam_cci_subdev_ioctl(struct v4l2_subdev *sd,
 	unsigned int cmd, void *arg)

@@ -77,6 +77,19 @@ static ssize_t flash_on_off(struct cam_flash_ctrl *flash_ctrl)
 			flash_data.led_current_ma[1] = 60;
 			cam_flash_on(flash_ctrl, &flash_data, 0);
 			break;
+
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+		case FLASH_ON_LEVEL1:
+		case FLASH_ON_LEVEL2:
+		case FLASH_ON_LEVEL3:
+		case FLASH_ON_LEVEL4:
+			cam_flash_off(flash_ctrl);
+			flash_data.led_current_ma[0] = flash_ctrl->flash_level_current[flash_mode - FLASH_ON_LEVEL1];
+			flash_data.led_current_ma[1] = flash_ctrl->flash_level_current[flash_mode - FLASH_ON_LEVEL1];
+			cam_flash_on(flash_ctrl, &flash_data, 0);
+			break;
+#endif
+
 		default:
 			break;
 	}
@@ -86,7 +99,7 @@ static ssize_t flash_on_off(struct cam_flash_ctrl *flash_ctrl)
 static ssize_t flash_proc_write(struct file *filp, const char __user *buff,
 						size_t len, loff_t *data)
 {
-	char buf[8] = {0};
+	char buf[9] = {0};
 	int rc = 0;
 	if (len > 8)
 		len = 8;
@@ -94,6 +107,7 @@ static ssize_t flash_proc_write(struct file *filp, const char __user *buff,
 		pr_err("proc write error.\n");
 		return -EFAULT;
 	}
+	buf[len] =  '\0';
 	flash_mode = simple_strtoul(buf, NULL, 10);
 	rc = flash_on_off(vendor_flash_ctrl);
 	if(rc < 0)
@@ -130,7 +144,7 @@ static int flash_proc_init(struct cam_flash_ctrl *flash_ctl)
 		}
 	}
 	if (flash_ctl->soc_info.index > 0) {
-		sprintf(strtmp, "%u", flash_ctl->soc_info.index);
+		sprintf(strtmp, "%d", flash_ctl->soc_info.index);
 		strcat(proc_flash, strtmp);
 	}
 	proc_entry = proc_create_data(proc_flash, 0666, NULL,&led_fops, NULL);

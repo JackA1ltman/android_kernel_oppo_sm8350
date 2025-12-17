@@ -23,8 +23,6 @@
 #define CAM_IFE_CUSTOM_CFG_FRAME_HEADER_TS   BIT(0)
 #define CAM_IFE_CUSTOM_CFG_SW_SYNC_ON        BIT(1)
 
-#define CAM_IFE_UBWC_COMP_EN                 BIT(1)
-
 /**
  * struct cam_ife_hw_mgr_debug - contain the debug information
  *
@@ -162,10 +160,6 @@ struct cam_ife_hw_mgr_ctx {
 	bool                            internal_cdm;
 	bool                            pf_mid_found;
 	bool                            is_anchor_instance;
-#ifdef OPLUS_FEATURE_CAMERA_COMMON//lanhe todo
-	bool                            use_rdi_sof;
-#endif
-
 };
 
 /**

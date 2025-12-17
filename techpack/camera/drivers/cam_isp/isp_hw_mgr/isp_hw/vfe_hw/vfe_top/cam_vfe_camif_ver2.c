@@ -56,6 +56,7 @@ struct cam_vfe_mux_camif_data {
 	struct timeval                     epoch_ts;
 	struct timeval                     eof_ts;
 	struct timeval                     error_ts;
+	bool                               trigger_control;
 };
 
 static int cam_vfe_camif_get_evt_payload(
@@ -405,8 +406,8 @@ static int cam_vfe_camif_resource_start(
 
 	cam_io_w_mb(val, rsrc_data->mem_base + rsrc_data->common_reg->core_cfg);
 
-	CAM_DBG(CAM_ISP, "hw id:%d core_cfg val:%d", camif_res->hw_intf->hw_idx,
-		val);
+	CAM_INFO(CAM_ISP, "hw id:%d core_cfg val:%d trigger_control:%d", camif_res->hw_intf->hw_idx,
+			val, rsrc_data->trigger_control);
 
 	/* disable the CGC for stats */
 	cam_io_w_mb(0xFFFFFFFF, rsrc_data->mem_base +
@@ -424,13 +425,40 @@ static int cam_vfe_camif_resource_start(
 				rsrc_data->camif_reg->epoch_irq);
 		break;
 	default:
-		epoch0_irq_mask = (((rsrc_data->last_line +
+		if (rsrc_data->trigger_control) {
+			epoch0_irq_mask = (((rsrc_data->last_line +
+			rsrc_data->vbi_value) -
+			rsrc_data->first_line) / 4);
+			if ((epoch0_irq_mask * 2) >
+				(rsrc_data->last_line - rsrc_data->first_line))
+				epoch0_irq_mask = rsrc_data->last_line -
+				rsrc_data->first_line;
+				CAM_INFO(CAM_ISP, "Trigger enable epoch0_irq_mask:0x%x  first_line: %u\n"
+						"last_line: %u vbi: %u\n"
+						"epoch0_irq_mask: 0x%x",
+						epoch0_irq_mask,
+						rsrc_data->first_line,
+						rsrc_data->last_line,
+						rsrc_data->vbi_value,
+						epoch0_irq_mask);
+		} else {
+			epoch0_irq_mask = (((rsrc_data->last_line +
 				rsrc_data->vbi_value) -
 				rsrc_data->first_line) / 2);
-		if ((epoch0_irq_mask) >
-			(rsrc_data->last_line - rsrc_data->first_line))
-			epoch0_irq_mask = rsrc_data->last_line -
+			if ((epoch0_irq_mask) >
+				(rsrc_data->last_line - rsrc_data->first_line))
+				epoch0_irq_mask = rsrc_data->last_line -
 				rsrc_data->first_line;
+				CAM_INFO(CAM_ISP, "Trigger disable epoch0_irq_mask:0x%x first_line: %u\n"
+						"last_line: %u vbi: %u\n"
+						"epoch0_irq_mask: 0x%x",
+						epoch0_irq_mask,
+						rsrc_data->first_line,
+						rsrc_data->last_line,
+						rsrc_data->vbi_value,
+						epoch0_irq_mask);
+		}
+
 
 		epoch1_irq_mask = rsrc_data->reg_data->epoch_line_cfg &
 				0xFFFF;
@@ -439,7 +467,7 @@ static int cam_vfe_camif_resource_start(
 		cam_io_w_mb(computed_epoch_line_cfg,
 				rsrc_data->mem_base +
 				rsrc_data->camif_reg->epoch_irq);
-		CAM_DBG(CAM_ISP, "first_line: %u\n"
+		CAM_INFO(CAM_ISP, "first_line: %u\n"
 				"last_line: %u vbi: %u\n"
 				"epoch_line_cfg: 0x%x",
 				rsrc_data->first_line,
@@ -523,7 +551,6 @@ static int cam_vfe_camif_reg_dump(
 	struct cam_isp_resource_node *camif_res)
 {
 	struct cam_vfe_mux_camif_data *camif_priv;
-	struct cam_vfe_soc_private *soc_private;
 	uint32_t offset, val, wm_idx;
 
 	if (!camif_res) {
@@ -553,34 +580,6 @@ static int cam_vfe_camif_reg_dump(
 			CAM_INFO(CAM_ISP,
 				"offset 0x%x value 0x%x", offset, val);
 		}
-	}
-
-	soc_private = camif_priv->soc_info->soc_private;
-	if (soc_private->cpas_version == CAM_CPAS_TITAN_175_V120 ||
-		soc_private->cpas_version == CAM_CPAS_TITAN_175_V130) {
-		cam_cpas_reg_read(soc_private->cpas_handle,
-			CAM_CPAS_REG_CAMNOC, 0x3A20, true, &val);
-		CAM_INFO(CAM_ISP, "IFE0_nRDI_MAXWR_LOW offset 0x3A20 val 0x%x",
-			val);
-
-		cam_cpas_reg_read(soc_private->cpas_handle,
-			CAM_CPAS_REG_CAMNOC, 0x5420, true, &val);
-		CAM_INFO(CAM_ISP, "IFE1_nRDI_MAXWR_LOW offset 0x5420 val 0x%x",
-			val);
-
-		cam_cpas_reg_read(soc_private->cpas_handle,
-			CAM_CPAS_REG_CAMNOC, 0x3620, true, &val);
-		CAM_INFO(CAM_ISP,
-			"IFE0123_RDI_WR_MAXWR_LOW offset 0x3620 val 0x%x", val);
-
-	} else if (soc_private->cpas_version < CAM_CPAS_TITAN_175_V120) {
-		cam_cpas_reg_read(soc_private->cpas_handle,
-			CAM_CPAS_REG_CAMNOC, 0x420, true, &val);
-		CAM_INFO(CAM_ISP, "IFE02_MAXWR_LOW offset 0x420 val 0x%x", val);
-
-		cam_cpas_reg_read(soc_private->cpas_handle,
-			CAM_CPAS_REG_CAMNOC, 0x820, true, &val);
-		CAM_INFO(CAM_ISP, "IFE13_MAXWR_LOW offset 0x820 val 0x%x", val);
 	}
 
 	return 0;
@@ -725,6 +724,20 @@ static int cam_vfe_camif_process_cmd(struct cam_isp_resource_node *rsrc_node,
 		break;
 	case CAM_ISP_HW_CMD_BLANKING_UPDATE:
 		rc = cam_vfe_camif_blanking_update(rsrc_node, cmd_args);
+		break;
+	case CAM_ISP_HW_CMD_QUERY_REGSPACE_DATA:
+		camif_priv = (struct cam_vfe_mux_camif_data *)
+			rsrc_node->res_priv;
+		*((struct cam_hw_soc_info **)cmd_args) = camif_priv->soc_info;
+		rc = 0;
+		break;
+	case CAM_ISP_HW_CMD_TRIGGER_CONROL:
+		camif_priv = (struct cam_vfe_mux_camif_data *)
+		rsrc_node->res_priv;
+		camif_priv->trigger_control = *((bool *)cmd_args);
+		CAM_INFO(CAM_ISP,"hw_idx:%d Trigger control:%d",
+				camif_priv->hw_intf->hw_idx,
+				camif_priv->trigger_control);
 		break;
 	default:
 		CAM_ERR(CAM_ISP,
@@ -884,6 +897,15 @@ static int cam_vfe_camif_handle_irq_bottom_half(void *handler_priv,
 			camif_priv->event_cb(camif_priv->priv,
 				CAM_ISP_HW_EVENT_ERROR, (void *)&evt_info);
 
+		CAM_INFO(CAM_ISP,
+			"SOF %lld:%lld EPOCH %lld:%lld EOF %lld:%lld",
+			camif_priv->sof_ts.tv_sec,
+			camif_priv->sof_ts.tv_usec,
+			camif_priv->epoch_ts.tv_sec,
+			camif_priv->epoch_ts.tv_usec,
+			camif_priv->eof_ts.tv_sec,
+			camif_priv->eof_ts.tv_usec);
+
 		CAM_INFO(CAM_ISP, "Violation status = %x",
 			payload->irq_reg_val[2]);
 
@@ -892,6 +914,9 @@ static int cam_vfe_camif_handle_irq_bottom_half(void *handler_priv,
 		CAM_INFO(CAM_ISP, "ife_clk_src:%lld",
 			soc_private->ife_clk_src);
 
+		cam_cpas_get_camnoc_fifo_fill_level_info(
+			soc_private->cpas_version,
+			soc_private->cpas_handle);
 		cam_cpas_log_votes();
 
 		if (camif_priv->camif_debug & CAMIF_DEBUG_ENABLE_REG_DUMP)
@@ -901,6 +926,14 @@ static int cam_vfe_camif_handle_irq_bottom_half(void *handler_priv,
 	if (irq_status1 & camif_priv->reg_data->error_irq_mask1) {
 		CAM_DBG(CAM_ISP, "Received ERROR");
 
+		CAM_INFO(CAM_ISP,
+			"SOF %lld:%lld EPOCH %lld:%lld EOF %lld:%lld",
+			camif_priv->sof_ts.tv_sec,
+			camif_priv->sof_ts.tv_usec,
+			camif_priv->epoch_ts.tv_sec,
+			camif_priv->epoch_ts.tv_usec,
+			camif_priv->eof_ts.tv_sec,
+			camif_priv->eof_ts.tv_usec);
 		ktime_get_boottime_ts64(&ts);
 		CAM_INFO(CAM_ISP,
 			"current monotonic time stamp seconds %lld:%lld",
@@ -918,6 +951,9 @@ static int cam_vfe_camif_handle_irq_bottom_half(void *handler_priv,
 		CAM_INFO(CAM_ISP, "ife_clk_src:%lld",
 			soc_private->ife_clk_src);
 
+		cam_cpas_get_camnoc_fifo_fill_level_info(
+			soc_private->cpas_version,
+			soc_private->cpas_handle);
 		cam_cpas_log_votes();
 
 		if (camif_priv->camif_debug & CAMIF_DEBUG_ENABLE_REG_DUMP)

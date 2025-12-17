@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
  */
 
 #include <linux/debugfs.h>
@@ -68,6 +68,9 @@ int cam_context_buf_done_from_hw(struct cam_context *ctx,
 			"[%s][%d] mismatch: done req[%lld], active req[%lld]",
 			ctx->dev_name, ctx->ctx_id,
 			done->request_id, req->request_id);
+		CAM_ERR(CAM_CTXT,
+			"[%s][%d] evt_id:%d evt_param:%d",
+			ctx->dev_name, ctx->ctx_id, evt_id, done->evt_param);
 		spin_unlock(&ctx->lock);
 		return -EIO;
 	}
@@ -104,8 +107,8 @@ int cam_context_buf_done_from_hw(struct cam_context *ctx,
 		req->out_map_entries[j].sync_id = -1;
 	}
 
-	if (cam_debug_ctx_req_list & ctx->dev_id)
-		CAM_INFO(CAM_CTXT,
+	//if (cam_debug_ctx_req_list & ctx->dev_id)
+		CAM_DBG(CAM_CTXT,
 			"[%s][%d] : Moving req[%llu] from active_list to free_list",
 			ctx->dev_name, ctx->ctx_id, req->request_id);
 
@@ -162,7 +165,7 @@ static int cam_context_apply_req_to_hw(struct cam_ctx_request *req,
 		list_add_tail(&req->list, &ctx->free_req_list);
 		spin_unlock(&ctx->lock);
 
-		if (cam_debug_ctx_req_list & ctx->dev_id)
+		//if (cam_debug_ctx_req_list & ctx->dev_id)
 			CAM_INFO(CAM_CTXT,
 				"[%s][%d] : Moving req[%llu] from active_list to free_list",
 				ctx->dev_name, ctx->ctx_id, req->request_id);
@@ -460,6 +463,9 @@ int32_t cam_context_prepare_dev_to_hw(struct cam_context *ctx,
 			rc = cam_sync_check_valid(
 				req->in_map_entries[j].sync_id);
 			if (rc) {
+				spin_lock(&ctx->lock);
+				list_del_init(&req->list);
+				spin_unlock(&ctx->lock);
 				CAM_ERR(CAM_CTXT,
 					"invalid in map sync object %d",
 					req->in_map_entries[j].sync_id);
@@ -538,8 +544,8 @@ int32_t cam_context_acquire_dev_to_hw(struct cam_context *ctx,
 		cmd->resource_hdl);
 
 	if (cmd->num_resources > CAM_CTX_RES_MAX) {
-		CAM_ERR(CAM_CTXT, "[%s][%d] resource limit exceeded",
-			ctx->dev_name, ctx->ctx_id);
+		CAM_ERR(CAM_CTXT, "[%s][%d] resource[%d] limit exceeded",
+			ctx->dev_name, ctx->ctx_id, cmd->num_resources);
 		rc = -ENOMEM;
 		goto end;
 	}
@@ -572,7 +578,7 @@ int32_t cam_context_acquire_dev_to_hw(struct cam_context *ctx,
 	ctx->hw_mgr_ctx_id = param.hw_mgr_ctx_id;
 
 	snprintf(ctx->ctx_id_string, sizeof(ctx->ctx_id_string),
-		"%s_ctx[%u]_hwmgrctx[%u]_Done",
+		"%s_ctx[%d]_hwmgrctx[%d]_Done",
 		ctx->dev_name,
 		ctx->ctx_id,
 		ctx->hw_mgr_ctx_id);
@@ -1009,7 +1015,7 @@ end:
 }
 
 int32_t cam_context_dump_pf_info_to_hw(struct cam_context *ctx,
-	struct cam_packet *packet, bool *mem_found, bool *ctx_found,
+	struct cam_hw_mgr_dump_pf_data *pf_data, bool *mem_found, bool *ctx_found,
 	uint32_t  *resource_type, struct cam_smmu_pf_info *pf_info)
 {
 	int rc = 0;
@@ -1031,7 +1037,7 @@ int32_t cam_context_dump_pf_info_to_hw(struct cam_context *ctx,
 	if (ctx->hw_mgr_intf->hw_cmd) {
 		cmd_args.ctxt_to_hw_map = ctx->ctxt_to_hw_map;
 		cmd_args.cmd_type = CAM_HW_MGR_CMD_DUMP_PF_INFO;
-		cmd_args.u.pf_args.pf_data.packet = packet;
+		cmd_args.u.pf_args.pf_data = *pf_data;
 		cmd_args.u.pf_args.iova = pf_info->iova;
 		cmd_args.u.pf_args.buf_info = pf_info->buf_info;
 		cmd_args.u.pf_args.mem_found = mem_found;

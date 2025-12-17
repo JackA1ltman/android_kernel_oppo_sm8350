@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
  */
 
 #ifndef _CAM_FLASH_DEV_H_
@@ -30,6 +30,7 @@
 #include "cam_subdev.h"
 #include "cam_mem_mgr.h"
 #include "cam_sensor_cmn_header.h"
+#include "cam_sensor_util.h"
 #include "cam_soc_util.h"
 #include "cam_debug_util.h"
 #include "cam_sensor_io.h"
@@ -45,6 +46,10 @@
 #define CAM_FLASH_PACKET_OPCODE_INIT                 0
 #define CAM_FLASH_PACKET_OPCODE_SET_OPS              1
 #define CAM_FLASH_PACKET_OPCODE_NON_REALTIME_SET_OPS 2
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+/*Add by MuMinghao @ Camera 2024/07/23 for torch*/
+#define MAX_TORCH_STRENGTH_LEVEL                     4
+#endif
 
 struct cam_flash_ctrl;
 
@@ -137,6 +142,7 @@ struct cam_flash_frame_setting {
  * @torch_op_current    : Torch operational current
  * @torch_max_current   : Max supported current for LED in torch mode
  * @is_wled_flash       : Detection between WLED/LED flash
+ * @flash_type          : Flash type
  */
 
 struct cam_flash_private_soc {
@@ -149,6 +155,7 @@ struct cam_flash_private_soc {
 	uint32_t     torch_op_current[CAM_FLASH_MAX_LED_TRIGGERS];
 	uint32_t     torch_max_current[CAM_FLASH_MAX_LED_TRIGGERS];
 	bool         is_wled_flash;
+	uint32_t     flash_type;
 };
 
 struct cam_flash_func_tbl {
@@ -218,6 +225,9 @@ struct cam_flash_ctrl {
 	const char *                        flash_name;
 	/*Add by Fangyan @ Camera 2020/08/17 for flash current*/
 	uint32_t                            flash_current;
+	/*Add by MuMinghao @ Camera 2024/07/23 for torch*/
+	int32_t                             flash_level_num;
+	uint32_t                            flash_level_current[MAX_TORCH_STRENGTH_LEVEL];
 #endif
 };
 

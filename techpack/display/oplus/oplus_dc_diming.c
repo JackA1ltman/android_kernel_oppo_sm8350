@@ -856,6 +856,7 @@ int sde_connector_update_hbm(struct drm_connector *connector)
 							dsi_panel_seed_mode(dsi_display->panel, seed_mode);
 							fingerprint_wait_vsync(c_conn->encoder, dsi_display->panel);
 							rc = dsi_panel_tx_cmd_set(dsi_display->panel, DSI_CMD_HBM_OFF);
+							dc_apollo.dc_pcc_updated = 0;
 							oplus_panel_update_backlight_unlock(panel);
 						}
 					}
@@ -927,6 +928,7 @@ int sde_connector_update_hbm(struct drm_connector *connector)
 						dsi_panel_seed_mode(dsi_display->panel, seed_mode);
 						fingerprint_wait_vsync(c_conn->encoder, dsi_display->panel);
 						rc = dsi_panel_tx_cmd_set(dsi_display->panel, DSI_CMD_HBM_OFF);
+						dc_apollo.dc_pcc_updated = 0;
 						if (enable_global_hbm_flags)
 							enable_global_hbm_flags = 0;
 						oplus_panel_update_backlight_unlock(panel);

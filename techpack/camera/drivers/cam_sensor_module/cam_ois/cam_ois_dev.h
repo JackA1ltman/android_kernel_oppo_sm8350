@@ -67,18 +67,6 @@ enum cam_ois_power_state {
 };
 #endif
 
-#ifdef OPLUS_FEATURE_CAMERA_COMMON
-enum cam_ois_close_state {
-	CAM_OIS_IS_OPEN,
-	CAM_OIS_IS_DOING_CLOSE,
-	CAM_OIS_IS_CLOSE,
-};
-enum cam_ois_download_fw_state {
-	CAM_OIS_FW_NOT_DOWNLOAD,
-	CAM_OIS_FW_DOWNLOAD_DONE,
-};
-#endif
-
 enum cam_ois_state {
 	CAM_OIS_INIT,
 	CAM_OIS_ACQUIRE,
@@ -219,13 +207,6 @@ struct cam_ois_ctrl_t {
 #ifdef OPLUS_FEATURE_CAMERA_COMMON
         uint8_t ois_eis_function;
         uint8_t ois_change_cci;
-	/*ois download in advance*/
-	struct task_struct *ois_downloadfw_thread;
-	struct mutex do_ioctl_ois;
-	enum cam_ois_download_fw_state ois_download_fw_done;
-	enum cam_ois_close_state ois_fd_have_close_state;
-	int  cam_ois_download_fw_in_advance;
-
 #endif
 };
 
