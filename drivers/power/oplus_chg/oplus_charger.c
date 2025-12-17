@@ -9763,13 +9763,13 @@ int oplus_chg_match_temp_for_chging(void)
 int oplus_get_adapter_power(void)
 {
 	int power = 0;
+	struct oplus_chg_chip *chip = g_charger_chip;
 #ifndef CONFIG_CHG_FOR_OP9_CN
 	bool wls_online = false;
-	struct oplus_chg_wls *wls_dev = oplus_chg_mod_get_drvdata(chip->wls_ocm);
+	struct oplus_chg_wls *wls_dev = NULL;
 #endif
 	bool vooc_online = false;
 	int fast_chg_type = 0;
-	struct oplus_chg_chip *chip = g_charger_chip;
 	
 	if (!chip) {
 		pr_err("oplus_get_adapter_power: g_charger_chip is NULL\n");
@@ -9786,9 +9786,10 @@ int oplus_get_adapter_power(void)
 		}
 #ifndef CONFIG_CHG_FOR_OP9_CN
 	if (wls_online) {
-		if (is_wls_ocm_available(chip))
+		if (is_wls_ocm_available(chip)) {
+			wls_dev = oplus_chg_mod_get_drvdata(chip->wls_ocm);
 			power = oplus_chg_wls_get_max_wireless_power(wls_dev);
-		else
+		} else
 			power = 0;
 	} else if (vooc_online) {
 #else
