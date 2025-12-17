@@ -264,8 +264,9 @@ static void sia8159_chip_off(
 static void sia8159_check_trimming(
 	struct regmap *regmap)
 {
-	static const uint32_t reg_num = 
-		SIA8159_REG_TRIMMING_END - SIA8159_REG_TRIMMING_BEGIN + 1;
+	enum {
+		reg_num = SIA8159_REG_TRIMMING_END - SIA8159_REG_TRIMMING_BEGIN + 1,
+	};
 	static const char defaults[reg_num] = {0x76, 0x66, 0x70};
 	uint8_t vals[reg_num] = {0};
 	uint8_t crc = 0;
