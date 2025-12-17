@@ -7642,8 +7642,10 @@ done:
 		fbt_env.fastpath = FRAME_BOOST_SELECT;
 #endif
 #if defined(OPLUS_FEATURE_SCHED_ASSIST) && defined(CONFIG_OPLUS_FEATURE_SCHED_ASSIST)
-	if (!fbt_env.fastpath || sysctl_ux_task_prefercpu_enable)
+	if (sysctl_ux_task_prefercpu_enable || !fbt_env.fastpath) {
 		set_ux_task_to_prefer_cpu(p, &best_energy_cpu);
+	}
+
 #endif /* defined(OPLUS_FEATURE_SCHED_ASSIST) && defined(CONFIG_OPLUS_FEATURE_SCHED_ASSIST) */
 
 	trace_sched_task_util(p, cpumask_bits(candidates)[0], best_energy_cpu,
