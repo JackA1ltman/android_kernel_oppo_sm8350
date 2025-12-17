@@ -33,7 +33,6 @@ extern int oplus_underbrightness_alpha;
 extern int oplus_dimlayer_dither_threshold;
 extern u32 oplus_last_backlight;
 extern int oplus_dimlayer_hbm;
-extern int oplus_dimlayer_hbm_saved;
 extern int oplus_panel_alpha;
 extern int hbm_mode;
 extern bool oplus_ffl_trigger_finish;
@@ -808,7 +807,7 @@ int oplus_display_panel_get_dimlayer_hbm(void *data)
 {
 	uint32_t *dimlayer_hbm = data;
 
-	(*dimlayer_hbm) = oplus_dimlayer_hbm_saved;
+	(*dimlayer_hbm) = oplus_dimlayer_hbm;
 
 	return 0;
 }
@@ -822,42 +821,24 @@ int oplus_display_panel_set_dimlayer_hbm(void *data)
 	int value = (*dimlayer_hbm);
 
 	value = !!value;
-	if (oplus_dimlayer_hbm_saved == value)
+	if (oplus_dimlayer_hbm == value)
 		return 0;
-	if (get_oplus_display_power_status() == OPLUS_DISPLAY_POWER_ON) {
-		if (!dsi_connector || !dsi_connector->state || !dsi_connector->state->crtc) {
-			pr_err("[%s]: display not ready\n", __func__);
+	if (!dsi_connector || !dsi_connector->state || !dsi_connector->state->crtc) {
+		pr_err("[%s]: display not ready\n", __func__);
+	} else {
+		err = drm_crtc_vblank_get(dsi_connector->state->crtc);
+		if (err) {
+			pr_err("failed to get crtc vblank, error=%d\n", err);
 		} else {
-			err = drm_crtc_vblank_get(dsi_connector->state->crtc);
-			if (err) {
-				pr_err("failed to get crtc vblank, error=%d\n", err);
-			} else {
-				/* do vblank put after 5 frames */
-				oplus_dimlayer_hbm_vblank_count = 5;
-				atomic_inc(&oplus_dimlayer_hbm_vblank_ref);
-			}
+			/* do vblank put after 5 frames */
+			oplus_dimlayer_hbm_vblank_count = 5;
+			atomic_inc(&oplus_dimlayer_hbm_vblank_ref);
 		}
-		oplus_dimlayer_hbm = value;
 	}
-	oplus_dimlayer_hbm_saved = value;
-
-#ifdef OPLUS_BUG_STABILITY
-        pr_err("debug for oplus_display_set_dimlayer_hbm set oplus_dimlayer_hbm = %d, oplus_dimlayer_hbm_saved = %d\n",
-		oplus_dimlayer_hbm, oplus_dimlayer_hbm_saved);
-#endif
+	oplus_dimlayer_hbm = value;
+	pr_err("debug for oplus_display_set_dimlayer_hbm set oplus_dimlayer_hbm = %d\n", oplus_dimlayer_hbm);
 
 	return 0;
-}
-
-void oplus_dimlayer_vblank(struct drm_crtc *crtc) {
-	int err = drm_crtc_vblank_get(crtc);
-	if (err) {
-		pr_err("failed to get crtc vblank, error=%d\n", err);
-	} else {
-		/* do vblank put after 5 frames */
-		oplus_dimlayer_hbm_vblank_count = 5;
-		atomic_inc(&oplus_dimlayer_hbm_vblank_ref);
-	}
 }
 
 int oplus_display_panel_notify_fp_press(void *data)

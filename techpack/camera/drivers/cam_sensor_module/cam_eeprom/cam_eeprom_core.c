@@ -15,9 +15,6 @@
 #include "cam_packet_util.h"
 #include "oplus_cam_eeprom_core.h"
 
-#ifdef OPLUS_FEATURE_CAMERA_COMMON
-#include "oplus_cam_kevent_fb.h"
-#endif
 
 #define         MAX_READ_SIZE           0x7FFFF
 #define         USER_MAT                0
@@ -43,13 +40,15 @@ static int cam_eeprom_read_memory(struct cam_eeprom_ctrl_t *e_ctrl,
 	struct cam_eeprom_memory_map_t    *emap = block->map;
 	struct cam_eeprom_soc_private     *eb_info = NULL;
 	uint8_t                           *memptr = block->mapdata;
-#ifdef OPLUS_FEATURE_CAMERA_COMMON
-	char fb_payload[PAYLOAD_LENGTH] = {0};
-#endif
+
 	if (!e_ctrl) {
 		CAM_ERR(CAM_EEPROM, "e_ctrl is NULL");
 		return -EINVAL;
 	}
+
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+        total_size = 0;
+#endif
 
 	eb_info = (struct cam_eeprom_soc_private *)e_ctrl->soc_info.soc_private;
 
@@ -118,7 +117,6 @@ static int cam_eeprom_read_memory(struct cam_eeprom_ctrl_t *e_ctrl,
 			rc = oplus_cam_eeprom_read_memory(e_ctrl, emap, j, memptr);
 			if (rc < 0) {
 				CAM_ERR(CAM_EEPROM, "cam_eeprom_read_memory_oem failed rc %d",rc);
-				KEVENT_FB_EEPRPOM_WR_FAILED(fb_payload, "camera eeprom read failed", rc);
 				return rc;
 			}
                         if(j > 0)
@@ -1238,7 +1236,9 @@ static int32_t cam_eeprom_pkt_parse(struct cam_eeprom_ctrl_t *e_ctrl, void *arg)
 	struct cam_eeprom_soc_private  *soc_private =
 		(struct cam_eeprom_soc_private *)e_ctrl->soc_info.soc_private;
 	struct cam_sensor_power_ctrl_t *power_info = &soc_private->power_info;
-
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+	int retry = 0;
+#endif
 	ioctl_ctrl = (struct cam_control *)arg;
 
 	if (copy_from_user(&dev_config,
@@ -1325,13 +1325,38 @@ static int32_t cam_eeprom_pkt_parse(struct cam_eeprom_ctrl_t *e_ctrl, void *arg)
 		}
 
 		e_ctrl->cam_eeprom_state = CAM_EEPROM_CONFIG;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+		rc = cam_eeprom_read_memory(e_ctrl, &e_ctrl->cal_data);
+
+		for (retry = 0; rc && retry < 3; retry++) {
+			CAM_ERR(CAM_EEPROM,"read_eeprom_memory failed ,retry until read_eeprom_memory is success");
+			cam_eeprom_power_down(e_ctrl);
+			msleep(2);
+			cam_eeprom_power_up(e_ctrl,
+				&soc_private->power_info);
+			msleep(2);
+			rc = cam_eeprom_read_memory(e_ctrl, &e_ctrl->cal_data);
+			if (rc) {
+				CAM_ERR(CAM_EEPROM,
+					"read_eeprom_memory failed retry:%d",retry);
+			}else{
+				break;
+			}
+		}
+
+		if (rc) {
+			CAM_ERR(CAM_EEPROM,
+				"read_eeprom_memory failed");
+			goto power_down;
+		}
+#else
 		rc = cam_eeprom_read_memory(e_ctrl, &e_ctrl->cal_data);
 		if (rc) {
 			CAM_ERR(CAM_EEPROM,
 				"read_eeprom_memory failed");
 			goto power_down;
 		}
-
+#endif
 		rc = cam_eeprom_get_cal_data(e_ctrl, csl_packet);
 		rc = cam_eeprom_power_down(e_ctrl);
 		e_ctrl->cam_eeprom_state = CAM_EEPROM_ACQUIRE;
@@ -1468,9 +1493,6 @@ int32_t cam_eeprom_driver_cmd(struct cam_eeprom_ctrl_t *e_ctrl, void *arg)
 	int                            rc = 0;
 	struct cam_eeprom_query_cap_t  eeprom_cap = {0};
 	struct cam_control            *cmd = (struct cam_control *)arg;
-#ifdef OPLUS_FEATURE_CAMERA_COMMON
-	char fb_payload[PAYLOAD_LENGTH] = {0};
-#endif
 
 	if (!e_ctrl || !cmd) {
 		CAM_ERR(CAM_EEPROM, "Invalid Arguments");
@@ -1488,7 +1510,6 @@ int32_t cam_eeprom_driver_cmd(struct cam_eeprom_ctrl_t *e_ctrl, void *arg)
 	rc = cam_eeprom_driver_cmd_oem(e_ctrl,arg);
 	if (rc) {
 		CAM_ERR(CAM_EEPROM, "Failed in check eeprom data");
-		KEVENT_FB_EEPRPOM_WR_FAILED(fb_payload, "camera eeprom write failed", rc);
 		goto release_mutex;
 	}
 #endif

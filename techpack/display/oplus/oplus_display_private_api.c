@@ -86,7 +86,6 @@ u32 oplus_last_backlight = 0;
 u32 oplus_backlight_delta = 0;
 
 int oplus_dimlayer_hbm = 0;
-int oplus_dimlayer_hbm_saved = 0;
 
 #ifdef OPLUS_FEATURE_TP_BASIC
 int shutdown_flag = 0;
@@ -2321,29 +2320,31 @@ static ssize_t oplus_display_set_dimlayer_hbm(struct kobject *obj,
 	sscanf(buf, "%d", &value);
 	value = !!value;
 
-	if (oplus_dimlayer_hbm_saved == value) {
+	if (oplus_dimlayer_hbm == value) {
 		return count;
 	}
-	if (get_oplus_display_power_status() == OPLUS_DISPLAY_POWER_ON) {
-		if (!dsi_connector || !dsi_connector->state || !dsi_connector->state->crtc) {
-			pr_err("[%s]: display not ready\n", __func__);
+
+	if (!dsi_connector || !dsi_connector->state || !dsi_connector->state->crtc) {
+		pr_err("[%s]: display not ready\n", __func__);
+
+	} else {
+		err = drm_crtc_vblank_get(dsi_connector->state->crtc);
+
+		if (err) {
+			pr_err("failed to get crtc vblank, error=%d\n", err);
+
 		} else {
-			err = drm_crtc_vblank_get(dsi_connector->state->crtc);
-			if (err) {
-				pr_err("failed to get crtc vblank, error=%d\n", err);
-			} else {
-				/* do vblank put after 5 frames */
-				oplus_dimlayer_hbm_vblank_count = 5;
-				atomic_inc(&oplus_dimlayer_hbm_vblank_ref);
-			}
+			/* do vblank put after 5 frames */
+			oplus_dimlayer_hbm_vblank_count = 5;
+			atomic_inc(&oplus_dimlayer_hbm_vblank_ref);
 		}
-		oplus_dimlayer_hbm = value;
 	}
-	oplus_dimlayer_hbm_saved = value;
+
+	oplus_dimlayer_hbm = value;
 
 #ifdef OPLUS_BUG_STABILITY
-	pr_err("debug for oplus_display_set_dimlayer_hbm set oplus_dimlayer_hbm = %d, oplus_dimlayer_hbm_saved = %d\n",
-		oplus_dimlayer_hbm, oplus_dimlayer_hbm_saved);
+	pr_err("debug for oplus_display_set_dimlayer_hbm set oplus_dimlayer_hbm = %d\n",
+	       oplus_dimlayer_hbm);
 #endif
 
 	return count;
@@ -3030,8 +3031,6 @@ int dsi_display_oplus_set_power(struct drm_connector *connector,
 		switch (get_oplus_display_scene()) {
 		case OPLUS_DISPLAY_NORMAL_SCENE:
 		case OPLUS_DISPLAY_NORMAL_HBM_SCENE:
-			oplus_dimlayer_hbm = 0;
-			oplus_dimlayer_vblank(connector->state->crtc);
 			rc = dsi_panel_set_lp1(display->panel);
 			rc = dsi_panel_set_lp2(display->panel);
 			set_oplus_display_scene(OPLUS_DISPLAY_AOD_SCENE);
@@ -3153,10 +3152,6 @@ int dsi_display_oplus_set_power(struct drm_connector *connector,
 		}
 
 		set_oplus_display_power_status(OPLUS_DISPLAY_POWER_ON);
-		if (oplus_dimlayer_hbm != oplus_dimlayer_hbm_saved) {
-			oplus_dimlayer_hbm = oplus_dimlayer_hbm_saved;
-			oplus_dimlayer_vblank(connector->state->crtc);
-		}
 		msm_drm_notifier_call_chain(MSM_DRM_EVENT_BLANK,
 						&notifier_data);
 		drm_panel_notifier_call_chain(&display->panel->drm_panel,

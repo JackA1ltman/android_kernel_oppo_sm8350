@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2020, The Linux Foundation. All rights reserved.
  */
 
 #include <linux/debugfs.h>
@@ -20,8 +20,10 @@
 #include "cam_isp_context.h"
 #include "cam_common_util.h"
 #include "cam_req_mgr_debug.h"
-#include "cam_cpas_api.h"
-#include "cam_subdev.h"
+#ifdef OPLUS_FEATURE_CAMERA_COMMON
+//lanhe add
+#include "cam_vfe_hw_intf.h"
+#endif
 
 static const char isp_dev_name[] = "cam-isp";
 
@@ -33,9 +35,6 @@ static struct cam_isp_ctx_debug isp_ctx_debug;
 
 static int cam_isp_context_dump_requests(void *data,
 	struct cam_smmu_pf_info *pf_info);
-
-static int cam_isp_context_handle_message(void *context,
-	uint32_t msg_type, uint32_t *data);
 
 static int __cam_isp_ctx_start_dev_in_ready(struct cam_context *ctx,
 	struct cam_start_stop_dev_cmd *cmd);
@@ -740,7 +739,8 @@ static void __cam_isp_ctx_send_sof_timestamp(
 		return;
 	}
 
-	if ((ctx_isp->use_frame_header_ts) || (request_id == 0))
+        if ((ctx_isp->use_frame_header_ts) && (request_id) &&
+            (sof_event_status == CAM_REQ_MGR_SOF_EVENT_SUCCESS))
 		goto end;
 
 	req_msg.session_hdl = ctx_isp->base->session_hdl;
@@ -750,6 +750,7 @@ static void __cam_isp_ctx_send_sof_timestamp(
 	req_msg.u.frame_msg.link_hdl = ctx_isp->base->link_hdl;
 	req_msg.u.frame_msg.sof_status = sof_event_status;
 	req_msg.u.frame_msg.frame_id_meta = ctx_isp->frame_id_meta;
+	ctx_isp->notified_req_id = request_id;
 
 	CAM_DBG(CAM_ISP,
 		"ctx:%d request id:%lld frame number:%lld SOF time stamp:0x%llx status:%u",
@@ -781,11 +782,11 @@ static void __cam_isp_ctx_handle_buf_done_fail_log(
 		return;
 	}
 
-	CAM_WARN_RATE_LIMIT(CAM_ISP,
+	CAM_WARN(CAM_ISP,
 		"Prev Req[%lld] : num_out=%d, num_acked=%d, bubble : report=%d, detected=%d",
 		request_id, req_isp->num_fence_map_out, req_isp->num_acked,
 		req_isp->bubble_report, req_isp->bubble_detected);
-	CAM_WARN_RATE_LIMIT(CAM_ISP,
+	CAM_WARN(CAM_ISP,
 		"Resource Handles that fail to generate buf_done in prev frame");
 	for (i = 0; i < req_isp->num_fence_map_out; i++) {
 		if (req_isp->fence_map_out[i].sync_id != -1) {
@@ -809,7 +810,7 @@ static void __cam_isp_ctx_handle_buf_done_fail_log(
 				request_id, req_isp->fence_map_out[i].sync_id);
 			}
 
-			CAM_WARN_RATE_LIMIT(CAM_ISP,
+			CAM_WARN(CAM_ISP,
 			"Resource_Handle: [%s][0x%x] Sync_ID: [0x%x]",
 			handle_type,
 			req_isp->fence_map_out[i].resource_handle,
@@ -853,7 +854,7 @@ static int __cam_isp_ctx_handle_buf_done_for_req_list(
 				"Move active request %lld to free list(cnt = %d) [flushed], ctx %u",
 				buf_done_req_id, ctx_isp->active_req_cnt,
 				ctx->ctx_id);
-			ctx_isp->last_bufdone_err_apply_req_id = 0;
+			ctx_isp->last_bufdone_error_apply_req_id = 0;
 		} else {
 			list_add(&req->list, &ctx->pending_req_list);
 			CAM_DBG(CAM_REQ,
@@ -877,27 +878,13 @@ static int __cam_isp_ctx_handle_buf_done_for_req_list(
 		list_add_tail(&req->list, &ctx->free_req_list);
 		req_isp->reapply = false;
 		req_isp->cdm_reset_before_apply = false;
-		req_isp->num_acked = 0;
-		req_isp->num_deferred_acks = 0;
-		req_isp->bubble_detected = false;
-		/*
-		 * Only update the process_bubble and bubble_frame_cnt
-		 * when bubble is detected on this req, in case the other
-		 * request is processing bubble.
-		 */
-		if (req_isp->bubble_detected) {
-			atomic_set(&ctx_isp->process_bubble, 0);
-			ctx_isp->bubble_frame_cnt = 0;
-		}
 
 		CAM_DBG(CAM_REQ,
 			"Move active request %lld to free list(cnt = %d) [all fences done], ctx %u",
 			buf_done_req_id, ctx_isp->active_req_cnt, ctx->ctx_id);
 		ctx_isp->req_info.last_bufdone_req_id = req->request_id;
-		ctx_isp->last_bufdone_err_apply_req_id = 0;
+		ctx_isp->last_bufdone_error_apply_req_id = 0;
 	}
-
-	cam_cpas_notify_event("IFE BufDone", buf_done_req_id);
 
 	__cam_isp_ctx_update_state_monitor_array(ctx_isp,
 		CAM_ISP_STATE_CHANGE_TRIGGER_DONE, buf_done_req_id);
@@ -924,9 +911,8 @@ static int __cam_isp_ctx_handle_buf_done_for_request(
 
 	req_isp = (struct cam_isp_ctx_req *) req->req_priv;
 
-	CAM_DBG(CAM_ISP,
-		"Enter with bubble_state %d, req_bubble_detected %d evt_param = %d",
-		bubble_state, req_isp->bubble_detected, done->evt_param);
+	CAM_DBG(CAM_ISP, "Enter with bubble_state %d, req_bubble_detected %d",
+		bubble_state, req_isp->bubble_detected);
 
 	done_next_req->num_handles = 0;
 	done_next_req->timestamp = done->timestamp;
@@ -982,31 +968,18 @@ static int __cam_isp_ctx_handle_buf_done_for_request(
 
 		if (!req_isp->bubble_detected) {
 			CAM_DBG(CAM_ISP,
-				"Sync with success: req %lld res 0x%x fd 0x%x, ctx %u, Bad_frame %u",
+				"Sync with success: req %lld res 0x%x fd 0x%x, ctx %u",
 				req->request_id,
 				req_isp->fence_map_out[j].resource_handle,
 				req_isp->fence_map_out[j].sync_id,
-				ctx->ctx_id, done->evt_param);
+				ctx->ctx_id);
 
-			if (done->evt_param == 1) {
-
-				CAM_WARN(CAM_ISP,
-					"Bad frame Sync with success: req %lld res 0x%x fd 0x%x, ctx %u",
-					req->request_id,
-					req_isp->fence_map_out[j].resource_handle,
-					req_isp->fence_map_out[j].sync_id,
-					ctx->ctx_id);
-				rc = cam_sync_signal(req_isp->fence_map_out[j].sync_id,
-					CAM_SYNC_STATE_SIGNALED_SUCCESS,
-					CAM_SYNC_ISP_EVENT_BAD_FRAME);
-			} else {
-				rc = cam_sync_signal(req_isp->fence_map_out[j].sync_id,
-					CAM_SYNC_STATE_SIGNALED_SUCCESS,
-					CAM_SYNC_COMMON_EVENT_SUCCESS);
-			}
+			rc = cam_sync_signal(req_isp->fence_map_out[j].sync_id,
+				CAM_SYNC_STATE_SIGNALED_SUCCESS,
+				CAM_SYNC_COMMON_EVENT_SUCCESS);
 			if (rc)
 				CAM_DBG(CAM_ISP, "Sync failed with rc = %d",
-					rc);
+					 rc);
 		} else if (!req_isp->bubble_report) {
 			CAM_DBG(CAM_ISP,
 				"Sync with failure: req %lld res 0x%x fd 0x%x, ctx %u",
@@ -1032,12 +1005,6 @@ static int __cam_isp_ctx_handle_buf_done_for_request(
 			CAM_DBG(CAM_ISP,
 				"buf done with bubble state %d recovery %d",
 				bubble_state, req_isp->bubble_report);
-			CAM_DBG(CAM_ISP,
-				"req %lld res 0x%x fd 0x%x, ctx %u",
-				req->request_id,
-				req_isp->fence_map_out[j].resource_handle,
-				req_isp->fence_map_out[j].sync_id,
-				ctx->ctx_id);
 			continue;
 		}
 
@@ -1149,15 +1116,13 @@ static int __cam_isp_ctx_handle_buf_done_for_request_verify_addr(
 	struct cam_isp_ctx_req *req_isp;
 	struct cam_context *ctx = ctx_isp->base;
 	const char *handle_type;
-	uint32_t event_cause = CAM_SYNC_COMMON_EVENT_SUCCESS;
 
 	trace_cam_buf_done("ISP", ctx, req);
 
 	req_isp = (struct cam_isp_ctx_req *) req->req_priv;
 
-	CAM_DBG(CAM_ISP,
-		"Enter with bubble_state %d, req_bubble_detected %d evt_param %d",
-		bubble_state, req_isp->bubble_detected, done->evt_param);
+	CAM_DBG(CAM_ISP, "Enter with bubble_state %d, req_bubble_detected %d",
+		bubble_state, req_isp->bubble_detected);
 
 	for (i = 0; i < done->num_handles; i++) {
 		for (j = 0; j < req_isp->num_fence_map_out; j++) {
@@ -1232,37 +1197,24 @@ static int __cam_isp_ctx_handle_buf_done_for_request_verify_addr(
 			continue;
 		} else if (!req_isp->bubble_detected) {
 			CAM_DBG(CAM_ISP,
-				"Sync with success: req %lld res 0x%x fd 0x%x, ctx %u isBadFrame %u",
+				"Sync with success: req %lld res 0x%x fd 0x%x, ctx %u",
 				req->request_id,
 				req_isp->fence_map_out[j].resource_handle,
 				req_isp->fence_map_out[j].sync_id,
-				ctx->ctx_id, done->evt_param);
-			if (done->evt_param == 1) {
-				CAM_WARN(CAM_ISP,
-					"Bad Frame Sync with success: req %lld res 0x%x fd 0x%x, ctx %u",
-					req->request_id,
-					req_isp->fence_map_out[j].resource_handle,
-					req_isp->fence_map_out[j].sync_id,
-					ctx->ctx_id);
-				rc = cam_sync_signal(req_isp->fence_map_out[j].sync_id,
-					CAM_SYNC_STATE_SIGNALED_SUCCESS,
-					CAM_SYNC_ISP_EVENT_BAD_FRAME);
-				event_cause = CAM_SYNC_ISP_EVENT_BAD_FRAME;
-			} else {
-				rc = cam_sync_signal(req_isp->fence_map_out[j].sync_id,
-					CAM_SYNC_STATE_SIGNALED_SUCCESS,
-					CAM_SYNC_COMMON_EVENT_SUCCESS);
-				event_cause = CAM_SYNC_COMMON_EVENT_SUCCESS;
-			}
+				ctx->ctx_id);
+
+			rc = cam_sync_signal(req_isp->fence_map_out[j].sync_id,
+				CAM_SYNC_STATE_SIGNALED_SUCCESS,
+				CAM_SYNC_COMMON_EVENT_SUCCESS);
 			if (rc) {
 				CAM_DBG(CAM_ISP, "Sync failed with rc = %d",
-				 rc);
+					 rc);
 			} else if (req_isp->num_deferred_acks) {
 				/* Process deferred buf_done acks */
 				__cam_isp_handle_deferred_buf_done(ctx_isp,
 					req, false,
 					CAM_SYNC_STATE_SIGNALED_SUCCESS,
-					event_cause);
+					CAM_SYNC_COMMON_EVENT_SUCCESS);
 			}
 		} else if (!req_isp->bubble_report) {
 			CAM_DBG(CAM_ISP,
@@ -1330,6 +1282,7 @@ static int __cam_isp_ctx_handle_buf_done_for_request_verify_addr(
 			"WARNING: req_id %lld num_acked %d > map_out %d, ctx %u",
 			req->request_id, req_isp->num_acked,
 			req_isp->num_fence_map_out, ctx->ctx_id);
+		WARN_ON(req_isp->num_acked > req_isp->num_fence_map_out);
 	}
 
 	if (req_isp->num_acked != req_isp->num_fence_map_out)
@@ -1348,58 +1301,9 @@ static int __cam_isp_ctx_handle_buf_done(
 	struct cam_ctx_request *req;
 	struct cam_context *ctx = ctx_isp->base;
 	struct cam_isp_hw_done_event_data done_next_req;
-	int i, j;
 
 	if (list_empty(&ctx->active_req_list)) {
 		CAM_WARN(CAM_ISP, "Buf done with no active request");
-
-		if (!list_empty(&ctx->wait_req_list)) {
-			struct cam_isp_ctx_req *req_isp;
-
-			req = list_first_entry(&ctx->wait_req_list,
-					struct cam_ctx_request, list);
-
-			if (ctx_isp->last_applied_req_id !=
-				ctx_isp->last_bufdone_err_apply_req_id) {
-				CAM_WARN(CAM_ISP,
-					"Buf done with no active req but"
-					" with req in wait list, req %llu last "
-					"apply id:%lld last err id:%lld",
-					req->request_id,
-					ctx_isp->last_applied_req_id,
-					ctx_isp->last_bufdone_err_apply_req_id);
-				ctx_isp->last_bufdone_err_apply_req_id =
-					ctx_isp->last_applied_req_id;
-			}
-
-			req_isp = (struct cam_isp_ctx_req *) req->req_priv;
-
-			/*
-			 * do not signal the fence as this request may go into
-			 * Bubble state eventually.
-			 */
-			for (i = 0; i < done->num_handles; i++) {
-				for (j = 0; j < req_isp->num_fence_map_out; j++) {
-					if (done->resource_handle[i] ==
-						req_isp->fence_map_out[j].
-						resource_handle) {
-						req_isp->num_acked++;
-						CAM_INFO(CAM_ISP,
-							"req %lld res 0x%x"
-							"fd 0x%x ctx %u",
-							req->request_id,
-							req_isp->
-							fence_map_out[j].
-							resource_handle,
-							req_isp->
-							fence_map_out[j].
-							sync_id,
-							ctx->ctx_id);
-						break;
-					}
-				}
-			}
-		}
 		return 0;
 	}
 
@@ -1509,13 +1413,12 @@ static int __cam_isp_ctx_handle_buf_done_verify_addr(
 
 			req_in_wait_list = true;
 			if (ctx_isp->last_applied_req_id !=
-				ctx_isp->last_bufdone_err_apply_req_id) {
+				ctx_isp->last_bufdone_error_apply_req_id) {
 				CAM_WARN(CAM_ISP,
-					"Buf done with no active request but with req in wait list, req %llu last apply id:%lld last err id:%lld",
+					"Buf done with no active request but with req in wait list, req %llu last apply id:%lld",
 					req->request_id,
-					ctx_isp->last_applied_req_id,
-					ctx_isp->last_bufdone_err_apply_req_id);
-				ctx_isp->last_bufdone_err_apply_req_id =
+					ctx_isp->last_applied_req_id);
+				ctx_isp->last_bufdone_error_apply_req_id =
 					ctx_isp->last_applied_req_id;
 			}
 
@@ -1534,11 +1437,11 @@ static int __cam_isp_ctx_handle_buf_done_verify_addr(
 		}
 
 		if (!req_in_wait_list  && (ctx_isp->last_applied_req_id !=
-			ctx_isp->last_bufdone_err_apply_req_id)) {
+			ctx_isp->last_bufdone_error_apply_req_id)) {
 			CAM_WARN(CAM_ISP,
 				"Buf done with no active request bubble_state=%d last_applied_req_id:%lld ",
 				bubble_state, ctx_isp->last_applied_req_id);
-			ctx_isp->last_bufdone_err_apply_req_id =
+			ctx_isp->last_bufdone_error_apply_req_id =
 					ctx_isp->last_applied_req_id;
 		}
 		return 0;
@@ -1559,6 +1462,21 @@ static int __cam_isp_ctx_handle_buf_done_verify_addr(
 			CAM_WARN(CAM_ISP,
 				"Req %lld only active request, spurious buf_done rxd",
 				req->request_id);
+	}
+
+    /*
+     * we get the buf done before the reg upd.
+     * the consumed address for wait req, otherwise, we
+     * can't verify the consumed address.
+     */
+    if (ctx_isp->active_req_cnt == 1) {
+        if (!list_empty(&ctx->wait_req_list)) {
+        	next_req = list_first_entry(&ctx->wait_req_list,
+        			struct cam_ctx_request, list);
+
+        	__cam_isp_ctx_buf_done_match_req(next_req, done,
+        		&irq_delay_detected);
+        }
 	}
 
 	/*
@@ -1830,6 +1748,7 @@ static int __cam_isp_ctx_notify_sof_in_activated_state(
 	uint64_t last_cdm_done_req = 0;
 	struct cam_isp_hw_epoch_event_data *epoch_done_event_data =
 			(struct cam_isp_hw_epoch_event_data *)evt_data;
+	char trace[64] = {0};
 
 	if (!evt_data) {
 		CAM_ERR(CAM_ISP, "invalid event data");
@@ -1890,7 +1809,6 @@ static int __cam_isp_ctx_notify_sof_in_activated_state(
 					"CDM callback not happened for req: %lld, possible CDM stuck or workqueue delay",
 					req->request_id);
 				req_isp->num_acked = 0;
-				req_isp->num_deferred_acks = 0;
 				ctx_isp->bubble_frame_cnt = 0;
 				req_isp->bubble_detected = false;
 				req_isp->cdm_reset_before_apply = true;
@@ -1945,17 +1863,23 @@ notify_only:
 			if ((!req_isp->bubble_detected) &&
 				(req->request_id > ctx_isp->reported_req_id)) {
 				request_id = req->request_id;
+				ctx_isp->reported_req_id = request_id;
+				CAM_DBG(CAM_ISP,
+					"ctx %d reported_req_id update to %lld",
+					ctx->ctx_id, ctx_isp->reported_req_id);
 				__cam_isp_ctx_update_event_record(ctx_isp,
 					CAM_ISP_CTX_EVENT_EPOCH, req);
 				break;
 			}
 		}
 
-		if (ctx_isp->substate_activated == CAM_ISP_CTX_ACTIVATED_BUBBLE)
+		if (ctx_isp->substate_activated == CAM_ISP_CTX_ACTIVATED_BUBBLE && ctx_isp->bubble_req_id - ctx_isp->notified_req_id <= 1) {
 			request_id = 0;
-
-		if (request_id != 0)
-			ctx_isp->reported_req_id = request_id;
+			memset(trace, 0, sizeof(trace));
+			snprintf(trace, sizeof(trace), "KMD %d_4 Skip Frame", ctx->link_hdl);
+			trace_int(trace, 0);
+			trace_begin_end("Req[%lld] CAM_ISP_CTX_ACTIVATED_BUBBLE", req->request_id);
+		}
 
 		__cam_isp_ctx_send_sof_timestamp(ctx_isp, request_id,
 			CAM_REQ_MGR_SOF_EVENT_SUCCESS);
@@ -2187,7 +2111,6 @@ static int __cam_isp_ctx_epoch_in_applied(struct cam_isp_context *ctx_isp,
 					ctx_isp->frame_id, ctx->ctx_id);
 			}
 		}
-		atomic_set(&ctx_isp->process_bubble, 1);
 	}
 
 	/*
@@ -2197,20 +2120,10 @@ static int __cam_isp_ctx_epoch_in_applied(struct cam_isp_context *ctx_isp,
 	list_del_init(&req->list);
 	list_add_tail(&req->list, &ctx->active_req_list);
 	ctx_isp->active_req_cnt++;
+	ctx_isp->bubble_req_id = req->request_id;
 	CAM_DBG(CAM_REQ, "move request %lld to active list(cnt = %d), ctx %u",
 		req->request_id, ctx_isp->active_req_cnt, ctx->ctx_id);
 
-	/*
-	 * Update the record before req pointer to
-	 * other invalid req.
-	 */
-	__cam_isp_ctx_update_event_record(ctx_isp,
-		CAM_ISP_CTX_EVENT_EPOCH, req);
-
-	/*
-	 * Get the req again from active_req_list in case
-	 * the active req cnt is 2.
-	 */
 	list_for_each_entry(req, &ctx->active_req_list, list) {
 		req_isp = (struct cam_isp_ctx_req *) req->req_priv;
 		if ((!req_isp->bubble_report) &&
@@ -2224,12 +2137,19 @@ static int __cam_isp_ctx_epoch_in_applied(struct cam_isp_context *ctx_isp,
 		}
 	}
 
+	CAM_DBG(CAM_ISP,
+		"ctx %d req:%lld bubble_report:%d bubble_detected:%d reported_req_id:%lld",
+		ctx->ctx_id, req->request_id, req_isp->bubble_report,
+		req_isp->bubble_detected, ctx_isp->reported_req_id);
+
 	if ((request_id != 0) && req_isp->bubble_detected)
 		sof_event_status = CAM_REQ_MGR_SOF_EVENT_ERROR;
 
 	__cam_isp_ctx_send_sof_timestamp(ctx_isp, request_id,
 		sof_event_status);
-
+	if (request_id != 0)
+		__cam_isp_ctx_update_event_record(ctx_isp,
+			CAM_ISP_CTX_EVENT_EPOCH, req);
 	ctx_isp->substate_activated = CAM_ISP_CTX_ACTIVATED_BUBBLE;
 	CAM_DBG(CAM_ISP, "next Substate[%s]",
 		__cam_isp_ctx_substate_val_to_type(
@@ -2381,6 +2301,8 @@ static int __cam_isp_ctx_epoch_in_bubble_applied(
 		ctx->ctx_id, req_isp->bubble_report, req->request_id);
 	req_isp->reapply = true;
 	req_isp->cdm_reset_before_apply = false;
+	req_isp->num_acked = 0;
+	req_isp->num_deferred_acks = 0;
 
 	if (req_isp->bubble_report && ctx->ctx_crm_intf &&
 		ctx->ctx_crm_intf->notify_err) {
@@ -2423,7 +2345,6 @@ static int __cam_isp_ctx_epoch_in_bubble_applied(
 					ctx_isp->frame_id, ctx->ctx_id);
 			}
 		}
-		atomic_set(&ctx_isp->process_bubble, 1);
 	}
 
 	/*
@@ -3239,13 +3160,44 @@ static int __cam_isp_ctx_apply_req_in_activated_state(
 	 * The maximum number of request allowed to be outstanding is 2.
 	 *
 	 */
+
 	if (atomic_read(&ctx_isp->process_bubble)) {
-		CAM_INFO_RATE_LIMIT(CAM_ISP,
-			"ctx_id:%d Processing bubble cannot apply Request Id %llu",
-			ctx->ctx_id,
-			apply->request_id);
-		rc = -EAGAIN;
-		goto end;
+            /*
+            * Only force breaking bubble processing when
+            * no congestion irq issue.
+            */
+            if ((ctx_isp->active_req_cnt == 1) &&
+                (++ctx_isp->apply_fail_cnt_on_bubble > 1)) {
+			spin_lock_bh(&ctx->lock);
+			req = list_first_entry(&ctx->active_req_list,
+				struct cam_ctx_request, list);
+			req_isp = (struct cam_isp_ctx_req *) req->req_priv;
+
+			req_isp->num_acked = 0;
+			ctx_isp->bubble_frame_cnt = 0;
+			req_isp->bubble_detected = false;
+			list_del_init(&req->list);
+			list_add(&req->list, &ctx->pending_req_list);
+			ctx_isp->active_req_cnt--;
+			spin_unlock_bh(&ctx->lock);
+			atomic_set(&ctx_isp->process_bubble, 0);
+			ctx_isp->apply_fail_cnt_on_bubble = 0;
+			rc = 0;
+			CAM_INFO(CAM_REQ,
+				"Force bubble done for req:%lld", req->request_id);
+			CAM_DBG(CAM_REQ,
+				"Move active req: %lld to pending list(cnt = %d) [bubble re-apply],ctx %u",
+				req->request_id,
+				ctx_isp->active_req_cnt, ctx->ctx_id);
+		} else {
+			CAM_INFO_RATE_LIMIT(CAM_ISP,
+				"ctx_id:%d Processing bubble cannot apply Request Id %llu",
+				ctx->ctx_id,
+				apply->request_id);
+
+			rc = -EAGAIN;
+			goto end;
+		}
 	}
 
 	spin_lock_bh(&ctx->lock);
@@ -3666,14 +3618,9 @@ static int __cam_isp_ctx_flush_req(struct cam_context *ctx,
 	}
 
 	if (list_empty(&flush_list)) {
-		/*
-		 * Maybe the req isn't sent to KMD since UMD already skip
-		 * req in CSL layer.
-		 */
-		CAM_INFO(CAM_ISP,
-			"flush list is empty, flush type %d for req %llu",
-			flush_req->type, flush_req->req_id);
-		return 0;
+		CAM_ERR(CAM_ISP, "flush list is empty, flush type %d",
+			flush_req->type);
+		return -EINVAL;
 	}
 
 	list_for_each_entry_safe(req, req_temp, &flush_list, list) {
@@ -3700,6 +3647,12 @@ static int __cam_isp_ctx_flush_req(struct cam_context *ctx,
 		list_del_init(&req->list);
 		list_add_tail(&req->list, &ctx->free_req_list);
 	}
+
+	if (flush_req->type == CAM_REQ_MGR_FLUSH_TYPE_CANCEL_REQ &&
+		!cancel_req_id_found)
+		CAM_DBG(CAM_ISP,
+			"Flush request id:%lld is not found in the list",
+			flush_req->req_id);
 
 	return 0;
 }
@@ -4078,7 +4031,6 @@ static int __cam_isp_ctx_rdi_only_sof_in_bubble_applied(
 			ctx_isp->frame_id,
 			ctx->ctx_id);
 		ctx->ctx_crm_intf->notify_err(&notify);
-		atomic_set(&ctx_isp->process_bubble, 1);
 	} else {
 		req_isp->bubble_report = 0;
 	}
@@ -4124,11 +4076,7 @@ static int __cam_isp_ctx_rdi_only_sof_in_bubble_state(
 	struct cam_req_mgr_trigger_notify      notify;
 	struct cam_isp_hw_sof_event_data      *sof_event_data = evt_data;
 	struct cam_isp_ctx_req                *req_isp;
-	struct cam_hw_cmd_args                 hw_cmd_args;
-	struct cam_isp_hw_cmd_args             isp_hw_cmd_args;
 	uint64_t                               request_id  = 0;
-	uint64_t                               last_cdm_done_req = 0;
-	int                                    rc = 0;
 
 	if (!evt_data) {
 		CAM_ERR(CAM_ISP, "in valid sof event data");
@@ -4140,73 +4088,6 @@ static int __cam_isp_ctx_rdi_only_sof_in_bubble_state(
 	ctx_isp->boot_timestamp = sof_event_data->boot_time;
 	CAM_DBG(CAM_ISP, "frame id: %lld time stamp:0x%llx",
 		ctx_isp->frame_id, ctx_isp->sof_timestamp_val);
-
-
-	if (atomic_read(&ctx_isp->process_bubble)) {
-		if (list_empty(&ctx->active_req_list)) {
-			CAM_ERR(CAM_ISP, "No available active req in bubble");
-			atomic_set(&ctx_isp->process_bubble, 0);
-			return -EINVAL;
-		}
-
-		if (ctx_isp->last_sof_timestamp ==
-			ctx_isp->sof_timestamp_val) {
-			CAM_DBG(CAM_ISP,
-				"Tasklet delay detected! Bubble frame: %lld check skipped, sof_timestamp: %lld, ctx_id: %d",
-				ctx_isp->frame_id,
-				ctx_isp->sof_timestamp_val,
-				ctx->ctx_id);
-			goto end;
-		}
-
-		req = list_first_entry(&ctx->active_req_list,
-				struct cam_ctx_request, list);
-		req_isp = (struct cam_isp_ctx_req *) req->req_priv;
-
-		if (req_isp->bubble_detected) {
-			hw_cmd_args.ctxt_to_hw_map = ctx_isp->hw_ctx;
-			hw_cmd_args.cmd_type = CAM_HW_MGR_CMD_INTERNAL;
-			isp_hw_cmd_args.cmd_type =
-				CAM_ISP_HW_MGR_GET_LAST_CDM_DONE;
-			hw_cmd_args.u.internal_args = (void *)&isp_hw_cmd_args;
-			rc = ctx->hw_mgr_intf->hw_cmd(
-				ctx->hw_mgr_intf->hw_mgr_priv,
-				&hw_cmd_args);
-			if (rc) {
-				CAM_ERR(CAM_ISP, "HW command failed");
-				return rc;
-			}
-
-			last_cdm_done_req = isp_hw_cmd_args.u.last_cdm_done;
-			CAM_DBG(CAM_ISP, "last_cdm_done req: %d ctx_id: %d",
-				last_cdm_done_req, ctx->ctx_id);
-
-			if (last_cdm_done_req >= req->request_id) {
-				CAM_DBG(CAM_ISP,
-					"CDM callback detected for req: %lld, possible buf_done delay, waiting for buf_done",
-					req->request_id);
-				goto end;
-			} else {
-				CAM_WARN(CAM_ISP,
-					"CDM callback not happened for req: %lld, possible CDM stuck or workqueue delay",
-					req->request_id);
-				req_isp->num_acked = 0;
-				req_isp->num_deferred_acks = 0;
-				req_isp->bubble_detected = false;
-				req_isp->cdm_reset_before_apply = true;
-				list_del_init(&req->list);
-				list_add(&req->list, &ctx->pending_req_list);
-				atomic_set(&ctx_isp->process_bubble, 0);
-				ctx_isp->active_req_cnt--;
-				CAM_DBG(CAM_REQ,
-					"Move active req: %lld to pending list(cnt = %d) [bubble re-apply],ctx %u",
-					req->request_id,
-					ctx_isp->active_req_cnt, ctx->ctx_id);
-			}
-			goto end;
-		}
-	}
-
 	/*
 	 * Signal all active requests with error and move the  all the active
 	 * requests to free list
@@ -4229,7 +4110,6 @@ static int __cam_isp_ctx_rdi_only_sof_in_bubble_state(
 		ctx_isp->active_req_cnt--;
 	}
 
-end:
 	/* notify reqmgr with sof signal */
 	if (ctx->ctx_crm_intf && ctx->ctx_crm_intf->notify_trigger) {
 		notify.link_hdl = ctx->link_hdl;
@@ -4260,7 +4140,6 @@ end:
 		__cam_isp_ctx_substate_val_to_type(
 		ctx_isp->substate_activated));
 
-	ctx_isp->last_sof_timestamp = ctx_isp->sof_timestamp_val;
 	return 0;
 }
 
@@ -4361,67 +4240,6 @@ error:
 	return 0;
 }
 
-#ifdef OPLUS_FEATURE_CAMERA_COMMON
-static int __cam_isp_ctx_rdi_only_reg_upd_in_applied_state(
-	struct cam_isp_context *ctx_isp, void *evt_data)
-{
-	struct cam_ctx_request  *req = NULL;
-	struct cam_context      *ctx = ctx_isp->base;
-	struct cam_isp_ctx_req  *req_isp;
-	uint64_t  request_id  = 0;
-
-	if (list_empty(&ctx->wait_req_list)) {
-		CAM_ERR(CAM_ISP, "Reg upd ack with no waiting request");
-		goto end;
-	}
-	ctx_isp->substate_activated = CAM_ISP_CTX_ACTIVATED_EPOCH;
-
-	req = list_first_entry(&ctx->wait_req_list,
-			struct cam_ctx_request, list);
-	list_del_init(&req->list);
-
-	req_isp = (struct cam_isp_ctx_req *) req->req_priv;
-
-	request_id = (req_isp->hw_update_data.packet_opcode_type ==
-			CAM_ISP_PACKET_INIT_DEV) ? 0 : req->request_id;
-
-	if (req_isp->num_fence_map_out != 0) {
-		list_add_tail(&req->list, &ctx->active_req_list);
-		ctx_isp->active_req_cnt++;
-		request_id = req->request_id;
-		CAM_DBG(CAM_REQ,
-			"move request %lld to active list(cnt = %d), ctx %u",
-			req->request_id, ctx_isp->active_req_cnt, ctx->ctx_id);
-		__cam_isp_ctx_update_event_record(ctx_isp,
-			CAM_ISP_CTX_EVENT_RUP, req);
-	} else {
-		/* no io config, so the request is completed. */
-		list_add_tail(&req->list, &ctx->free_req_list);
-		CAM_DBG(CAM_ISP,
-			"move active request %lld to free list(cnt = %d), ctx %u",
-			req->request_id, ctx_isp->active_req_cnt, ctx->ctx_id);
-	}
-
-	CAM_DBG(CAM_ISP, "next Substate[%s]",
-		__cam_isp_ctx_substate_val_to_type(
-		ctx_isp->substate_activated));
-
-	__cam_isp_ctx_update_event_record(ctx_isp,
-		CAM_ISP_CTX_EVENT_RUP, req);
-
-	return 0;
-end:
-	__cam_isp_ctx_update_event_record(ctx_isp,
-		CAM_ISP_CTX_EVENT_RUP, NULL);
-	/*
-	 * There is no request in the pending list, move the sub state machine
-	 * to SOF sub state
-	 */
-	ctx_isp->substate_activated = CAM_ISP_CTX_ACTIVATED_SOF;
-	return 0;
-}
-#endif
-
 static struct cam_isp_ctx_irq_ops
 	cam_isp_ctx_rdi_only_activated_state_machine_irq
 			[CAM_ISP_CTX_ACTIVATED_MAX] = {
@@ -4441,11 +4259,7 @@ static struct cam_isp_ctx_irq_ops
 		.irq_ops = {
 			__cam_isp_ctx_handle_error,
 			__cam_isp_ctx_rdi_only_sof_in_applied_state,
-#ifdef OPLUS_FEATURE_CAMERA_COMMON
-			__cam_isp_ctx_rdi_only_reg_upd_in_applied_state,
-#else
 			NULL,
-#endif
 			NULL,
 			NULL,
 			__cam_isp_ctx_buf_done_in_applied,
@@ -4852,10 +4666,11 @@ static int __cam_isp_ctx_config_dev_in_top_state(
 		} else if ((ctx->state != CAM_CTX_FLUSHED) &&
 			(ctx->state >= CAM_CTX_READY) &&
 			ctx->ctx_crm_intf->add_req) {
-			memset(&add_req, 0, sizeof(add_req));
 			add_req.link_hdl = ctx->link_hdl;
 			add_req.dev_hdl  = ctx->dev_hdl;
 			add_req.req_id   = req->request_id;
+			add_req.skip_before_applying = 0;
+			add_req.trigger_eof = false;
 			rc = ctx->ctx_crm_intf->add_req(&add_req);
 			if (rc) {
 				CAM_ERR(CAM_ISP, "Add req failed: req id=%llu",
@@ -5267,6 +5082,9 @@ static int __cam_isp_ctx_acquire_hw_v2(struct cam_context *ctx,
 	param.num_acq = CAM_API_COMPAT_CONSTANT;
 	param.acquire_info_size = cmd->data_size;
 	param.acquire_info = (uint64_t) acquire_hw_info;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON//lanhe todo
+	param.use_rdi_sof = (cmd->reserved&CAM_IFE_CTX_RDI_SOF_EN)?true:false;
+#endif
 
 	/* call HW manager to reserve the resource */
 	rc = ctx->hw_mgr_intf->hw_acquire(ctx->hw_mgr_intf->hw_mgr_priv,
@@ -5486,7 +5304,6 @@ static int __cam_isp_ctx_link_in_acquired(struct cam_context *ctx,
 	ctx_isp->subscribe_event =
 		CAM_TRIGGER_POINT_SOF | CAM_TRIGGER_POINT_EOF;
 	ctx_isp->trigger_id = link->trigger_id;
-	ctx_isp->trigger_control = link->trigger_control;
 
 	/* change state only if we had the init config */
 	if (ctx_isp->init_received) {
@@ -5494,7 +5311,7 @@ static int __cam_isp_ctx_link_in_acquired(struct cam_context *ctx,
 		trace_cam_context_state("ISP", ctx);
 	}
 
-	CAM_INFO(CAM_ISP, "next state %d trigger_control:%d ", ctx->state, ctx_isp->trigger_control);
+	CAM_DBG(CAM_ISP, "next state %d", ctx->state);
 
 	return rc;
 }
@@ -5640,18 +5457,6 @@ static int __cam_isp_ctx_start_dev_in_ready(struct cam_context *ctx,
 
 	ctx_isp->is_anchor_instance = isp_hw_cmd_args.u.is_anchor_instance;
 
-	/* set trigger control */
-	hw_cmd_args.ctxt_to_hw_map = ctx_isp->hw_ctx;
-	hw_cmd_args.cmd_type = CAM_HW_MGR_CMD_INTERNAL;
-	isp_hw_cmd_args.cmd_type = CAM_ISP_HW_MGR_CMD_TRIGGER_CONTROL;
-	isp_hw_cmd_args.u.trigger_control = ctx_isp->trigger_control;
-	hw_cmd_args.u.internal_args = (void *)&isp_hw_cmd_args;
-	rc = ctx->hw_mgr_intf->hw_cmd(ctx->hw_mgr_intf->hw_mgr_priv,
-           &hw_cmd_args);
-	CAM_INFO(CAM_ISP,"Set Trigger control ctx id:%d trigger_control:%d rc =%d",
-			ctx->ctx_id, isp_hw_cmd_args.u.trigger_control, rc);
-
-
 	/*
 	 * Only place to change state before calling the hw due to
 	 * hardware tasklet has higher priority that can cause the
@@ -5793,6 +5598,8 @@ static int __cam_isp_ctx_stop_dev_in_activated_unlock(
 	ctx_isp->active_req_cnt = 0;
 	ctx_isp->reported_req_id = 0;
 	ctx_isp->last_applied_req_id = 0;
+	ctx_isp->bubble_req_id = 0;
+	ctx_isp->notified_req_id = 0;
 	ctx_isp->req_info.last_bufdone_req_id = 0;
 	ctx_isp->bubble_frame_cnt = 0;
 	ctx_isp->apply_fail_cnt_on_bubble = 0;
@@ -6005,6 +5812,35 @@ static int __cam_isp_ctx_handle_irq_in_activated(void *context,
 
 	spin_lock(&ctx->lock);
 
+#ifdef OPLUS_FEATURE_CAMERA_COMMON //lanhe todo:
+	if(evt_id == CAM_ISP_HW_EVENT_SOF)
+	{
+		uint32_t res_id =
+			((struct cam_isp_hw_sof_event_data *)evt_data)->res_id;
+		if(res_id == CAM_ISP_HW_VFE_IN_RDI0)
+		{
+			struct cam_req_mgr_trigger_notify  notify;
+			ctx_isp->rdi_frame_id++;
+			//add process logic
+			if (ctx_isp->subscribe_event & CAM_TRIGGER_POINT_SOF) {
+				notify.link_hdl = ctx->link_hdl;
+				notify.dev_hdl = ctx->dev_hdl;
+				notify.frame_id = ctx_isp->rdi_frame_id;
+				notify.trigger = CAM_TRIGGER_POINT_RDI_SOF;
+				notify.req_id = ctx_isp->req_info.last_bufdone_req_id;
+				notify.sof_timestamp_val = ctx_isp->sof_timestamp_val;
+				notify.trigger_id = ctx_isp->trigger_id;
+
+				ctx->ctx_crm_intf->notify_trigger(&notify);
+				CAM_DBG(CAM_ISP, "Notify CRM  RDI SOF frame %lld",
+					ctx_isp->rdi_frame_id);
+			}
+			spin_unlock(&ctx->lock);
+			return rc;
+		}
+	}
+#endif
+
 	trace_cam_isp_activated_irq(ctx, ctx_isp->substate_activated, evt_id,
 		__cam_isp_ctx_get_event_ts(evt_id, evt_data));
 
@@ -6029,12 +5865,6 @@ static int __cam_isp_ctx_handle_irq_in_activated(void *context,
 	return rc;
 }
 
-static int __cam_isp_shutdown_dev(
-	struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
-{
-	return cam_isp_subdev_close_internal(sd, fh);
-}
-
 /* top state machine */
 static struct cam_ctx_ops
 	cam_isp_ctx_top_state_machine[CAM_CTX_STATE_MAX] = {
@@ -6048,7 +5878,6 @@ static struct cam_ctx_ops
 	{
 		.ioctl_ops = {
 			.acquire_dev = __cam_isp_ctx_acquire_dev_in_available,
-			.shutdown_dev = __cam_isp_shutdown_dev,
 		},
 		.crm_ops = {},
 		.irq_ops = NULL,
@@ -6060,7 +5889,6 @@ static struct cam_ctx_ops
 			.release_dev = __cam_isp_ctx_release_dev_in_top_state,
 			.config_dev = __cam_isp_ctx_config_dev_in_acquired,
 			.release_hw = __cam_isp_ctx_release_hw_in_top_state,
-			.shutdown_dev = __cam_isp_shutdown_dev,
 		},
 		.crm_ops = {
 			.link = __cam_isp_ctx_link_in_acquired,
@@ -6080,7 +5908,6 @@ static struct cam_ctx_ops
 			.release_dev = __cam_isp_ctx_release_dev_in_top_state,
 			.config_dev = __cam_isp_ctx_config_dev_in_top_state,
 			.release_hw = __cam_isp_ctx_release_hw_in_top_state,
-			.shutdown_dev = __cam_isp_shutdown_dev,
 		},
 		.crm_ops = {
 			.unlink = __cam_isp_ctx_unlink_in_ready,
@@ -6098,7 +5925,6 @@ static struct cam_ctx_ops
 			.release_dev = __cam_isp_ctx_release_dev_in_activated,
 			.config_dev = __cam_isp_ctx_config_dev_in_flushed,
 			.release_hw = __cam_isp_ctx_release_hw_in_activated,
-			.shutdown_dev = __cam_isp_shutdown_dev,
 		},
 		.crm_ops = {
 			.unlink = __cam_isp_ctx_unlink_in_ready,
@@ -6107,7 +5933,6 @@ static struct cam_ctx_ops
 		.irq_ops = NULL,
 		.pagefault_ops = cam_isp_context_dump_requests,
 		.dumpinfo_ops = cam_isp_context_info_dump,
-		.msg_cb_ops = cam_isp_context_handle_message,
 	},
 	/* Activated */
 	{
@@ -6116,7 +5941,6 @@ static struct cam_ctx_ops
 			.release_dev = __cam_isp_ctx_release_dev_in_activated,
 			.config_dev = __cam_isp_ctx_config_dev_in_top_state,
 			.release_hw = __cam_isp_ctx_release_hw_in_activated,
-			.shutdown_dev = __cam_isp_shutdown_dev,
 		},
 		.crm_ops = {
 			.unlink = __cam_isp_ctx_unlink_in_activated,
@@ -6128,7 +5952,6 @@ static struct cam_ctx_ops
 		.irq_ops = __cam_isp_ctx_handle_irq_in_activated,
 		.pagefault_ops = cam_isp_context_dump_requests,
 		.dumpinfo_ops = cam_isp_context_info_dump,
-		.msg_cb_ops = cam_isp_context_handle_message,
 	},
 };
 
@@ -6167,7 +5990,7 @@ static int cam_isp_context_dump_requests(void *data,
 		CAM_INFO(CAM_ISP, "Active List: req_id : %lld ",
 			req->request_id);
 
-		rc = cam_context_dump_pf_info_to_hw(ctx, pf_dbg_entry,
+		rc = cam_context_dump_pf_info_to_hw(ctx, pf_dbg_entry->packet,
 			&mem_found, &ctx_found, &resource_type, pf_info);
 		if (rc)
 			CAM_ERR(CAM_ISP, "Failed to dump pf info");
@@ -6186,7 +6009,7 @@ static int cam_isp_context_dump_requests(void *data,
 		pf_dbg_entry = &(req->pf_data);
 		CAM_INFO(CAM_ISP, "Wait List: req_id : %lld ", req->request_id);
 
-		rc = cam_context_dump_pf_info_to_hw(ctx, pf_dbg_entry,
+		rc = cam_context_dump_pf_info_to_hw(ctx, pf_dbg_entry->packet,
 			&mem_found, &ctx_found, &resource_type, pf_info);
 		if (rc)
 			CAM_ERR(CAM_ISP, "Failed to dump pf info");
@@ -6216,7 +6039,7 @@ static int cam_isp_context_dump_requests(void *data,
 		CAM_INFO(CAM_ISP, "Pending List: req_id : %lld ",
 			req->request_id);
 
-		rc = cam_context_dump_pf_info_to_hw(ctx, pf_dbg_entry,
+		rc = cam_context_dump_pf_info_to_hw(ctx, pf_dbg_entry->packet,
 			&mem_found, &ctx_found, &resource_type, pf_info);
 		if (rc)
 			CAM_ERR(CAM_ISP, "Failed to dump pf info");
@@ -6271,34 +6094,6 @@ static int cam_isp_context_dump_requests(void *data,
 	return rc;
 }
 
-static int cam_isp_context_handle_message(void *context,
-	uint32_t msg_type, uint32_t *data)
-{
-	int                            rc = 0;
-	struct cam_hw_cmd_args         hw_cmd_args;
-	struct cam_isp_hw_cmd_args     isp_hw_cmd_args;
-	struct cam_context            *ctx = (struct cam_context *)context;
-
-	memset(&hw_cmd_args, 0, sizeof(hw_cmd_args));
-	hw_cmd_args.ctxt_to_hw_map = ctx->ctxt_to_hw_map;
-
-	switch (msg_type) {
-	case CAM_SUBDEV_MESSAGE_CLOCK_UPDATE:
-		hw_cmd_args.cmd_type = CAM_HW_MGR_CMD_INTERNAL;
-		isp_hw_cmd_args.cmd_type = CAM_ISP_HW_MGR_CMD_UPDATE_CLOCK;
-		isp_hw_cmd_args.cmd_data = (void *)data;
-		hw_cmd_args.u.internal_args = (void *)&isp_hw_cmd_args;
-		rc = ctx->hw_mgr_intf->hw_cmd(ctx->hw_mgr_intf->hw_mgr_priv,
-			&hw_cmd_args);
-		if (rc)
-			CAM_ERR(CAM_ISP, "Update clock rate failed rc: %d", rc);
-		break;
-	default:
-		CAM_ERR(CAM_ISP, "Invalid message type %d", msg_type);
-	}
-	return rc;
-}
-
 static int cam_isp_context_debug_register(void)
 {
 	int rc = 0;
@@ -6348,6 +6143,9 @@ int cam_isp_context_init(struct cam_isp_context *ctx,
 
 	ctx->base = ctx_base;
 	ctx->frame_id = 0;
+#ifdef OPLUS_FEATURE_CAMERA_COMMON //lanhe todo:
+	ctx->rdi_frame_id = 0;
+#endif
 	ctx->custom_enabled = false;
 	ctx->use_frame_header_ts = false;
 	ctx->active_req_cnt = 0;
