@@ -1372,8 +1372,8 @@ static enum oplus_chg_mod_property oplus_chg_intf_batt_props[] = {
 	OPLUS_CHG_PROP_VOOCCHG_ING,
 	OPLUS_CHG_PROP_SHIP_MODE,
 	OPLUS_CHG_PROP_CHARGE_NOW,
-	OPLUS_CHG_PROP_DESIGN_CAPACITY,
 #endif /* CONFIG_OPLUS_CHG_OOS */
+	OPLUS_CHG_PROP_DESIGN_CAPACITY,
 };
 
 static enum oplus_chg_mod_property oplus_chg_intf_batt_uevent_props[] = {
