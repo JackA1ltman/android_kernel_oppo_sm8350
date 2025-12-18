@@ -323,12 +323,7 @@ static struct device_attribute oplus_chg_mod_attrs[] = {
 	OPLUS_CHG_MOD_ATTR(fastchg_status),
 	OPLUS_CHG_MOD_ATTR(adapter_sid),
 	OPLUS_CHG_MOD_ATTR(adapter_type),
-	OPLUS_CHG_MOD_ATTR(adapter_power),
-	OPLUS_CHG_MOD_ATTR(project_power),
-	OPLUS_CHG_MOD_ATTR(device_power),
-	OPLUS_CHG_MOD_ATTR(ui_power),
-	OPLUS_CHG_MOD_ATTR(cpa_power),
-	OPLUS_CHG_MOD_ATTR(protocol_type),
+
 	OPLUS_CHG_MOD_ATTR(design_capacity),
 	OPLUS_CHG_MOD_ATTR(temp_region),
 	OPLUS_CHG_MOD_ATTR(con_temp1),
@@ -444,6 +439,12 @@ static struct device_attribute oplus_chg_mod_attrs[] = {
 	OPLUS_CHG_MOD_ATTR(real_type),
 	OPLUS_CHG_MOD_ATTR(charge_now),
 #endif /* CONFIG_OPLUS_CHG_OOS */
+	OPLUS_CHG_MOD_ATTR(adapter_power),
+	OPLUS_CHG_MOD_ATTR(project_power),
+	OPLUS_CHG_MOD_ATTR(device_power),
+	OPLUS_CHG_MOD_ATTR(ui_power),
+	OPLUS_CHG_MOD_ATTR(cpa_power),
+	OPLUS_CHG_MOD_ATTR(protocol_type),
 
 	/* extended attr */
 	OPLUS_CHG_MOD_EXTERN_ATTR(upgrade_firmware),
