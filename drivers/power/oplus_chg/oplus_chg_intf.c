@@ -1311,6 +1311,7 @@ static enum oplus_chg_mod_property oplus_chg_intf_batt_props[] = {
 	OPLUS_CHG_PROP_CHG_ENABLE,
 	OPLUS_CHG_PROP_CAPACITY,
 	OPLUS_CHG_PROP_REAL_CAPACITY,
+	OPLUS_CHG_PROP_DESIGN_CAPACITY,
 	OPLUS_CHG_PROP_CHARGE_TYPE,
 	OPLUS_CHG_PROP_CELL_NUM,
 	OPLUS_CHG_PROP_MODEL_NAME,
@@ -1373,7 +1374,6 @@ static enum oplus_chg_mod_property oplus_chg_intf_batt_props[] = {
 	OPLUS_CHG_PROP_SHIP_MODE,
 	OPLUS_CHG_PROP_CHARGE_NOW,
 #endif /* CONFIG_OPLUS_CHG_OOS */
-	OPLUS_CHG_PROP_DESIGN_CAPACITY,
 };
 
 static enum oplus_chg_mod_property oplus_chg_intf_batt_uevent_props[] = {
