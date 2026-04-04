@@ -150,4 +150,24 @@ struct robust_list_head {
   (((op & 0xf) << 28) | ((cmp & 0xf) << 24)		\
    | ((oparg & 0xfff) << 12) | (cmparg & 0xfff))
 
+/*
+ * Flags for futex_waitv (backported from 5.16)
+ */
+#define FUTEX_32		2
+#define FUTEX_WAITV_MAX		128
+
+/**
+ * struct futex_waitv - A waiter for vectorized wait
+ * @val:   Expected value at uaddr
+ * @uaddr: User address to wait on
+ * @flags: Flags for this waiter (FUTEX_32, etc.)
+ * @__reserved: Reserved member to preserve data alignment. Should be 0.
+ */
+struct futex_waitv {
+	__u64 val;
+	__u64 uaddr;
+	__u32 flags;
+	__u32 __reserved;
+};
+
 #endif /* _UAPI_LINUX_FUTEX_H */

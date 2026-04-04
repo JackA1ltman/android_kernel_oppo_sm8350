@@ -487,3 +487,18 @@ out:
 	kfree(data);
 	return ret;
 }
+
+/* Stubs for 5.7+ test_run functions referenced by backported BPF code */
+int bpf_prog_test_run_raw_tp(struct bpf_prog *prog,
+			     const union bpf_attr *kattr,
+			     union bpf_attr __user *uattr)
+{
+	return -ENOTSUPP;
+}
+
+int bpf_prog_test_run_tracing(struct bpf_prog *prog,
+			      const union bpf_attr *kattr,
+			      union bpf_attr __user *uattr)
+{
+	return -ENOTSUPP;
+}

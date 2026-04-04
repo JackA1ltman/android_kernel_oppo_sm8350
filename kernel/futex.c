@@ -4250,3 +4250,126 @@ static int __init futex_init(void)
 	return 0;
 }
 core_initcall(futex_init);
+
+/*
+ * futex_waitv - Wait on a set of futexes (backported from 5.16)
+ *
+ * Simplified implementation: sequentially waits on each futex using the
+ * existing futex_wait infrastructure. Returns the index of the futex that
+ * was woken, or error.
+ */
+#include <linux/compat.h>
+
+static int futex_parse_waitv(struct futex_waitv __user *uwaitv, unsigned int nr_futexes,
+			     struct futex_waitv *waitv)
+{
+	unsigned int i;
+
+	if (!nr_futexes || nr_futexes > FUTEX_WAITV_MAX)
+		return -EINVAL;
+
+	if (copy_from_user(waitv, uwaitv, nr_futexes * sizeof(*waitv)))
+		return -EFAULT;
+
+	for (i = 0; i < nr_futexes; i++) {
+		if (waitv[i].flags & ~FUTEX_32)
+			return -EINVAL;
+		if (!(waitv[i].flags & FUTEX_32))
+			return -EINVAL;
+		if (waitv[i].__reserved)
+			return -EINVAL;
+	}
+
+	return 0;
+}
+
+SYSCALL_DEFINE5(futex_waitv, struct futex_waitv __user *, waiters,
+		unsigned int, nr_futexes, unsigned int, flags,
+		struct __kernel_timespec __user *, timeout, clockid_t, clockid)
+{
+	struct futex_waitv stackv[8];
+	struct futex_waitv *waitv = stackv;
+	struct hrtimer_sleeper to;
+	int ret, i;
+	ktime_t *tp = NULL, t;
+
+	if (flags)
+		return -EINVAL;
+
+	if (!nr_futexes || nr_futexes > FUTEX_WAITV_MAX)
+		return -EINVAL;
+
+	if (clockid != CLOCK_MONOTONIC && clockid != CLOCK_REALTIME)
+		return -EINVAL;
+
+	if (nr_futexes > ARRAY_SIZE(stackv)) {
+		waitv = kvmalloc_array(nr_futexes, sizeof(*waitv), GFP_KERNEL);
+		if (!waitv)
+			return -ENOMEM;
+	}
+
+	ret = futex_parse_waitv(waiters, nr_futexes, waitv);
+	if (ret)
+		goto out;
+
+	if (timeout) {
+		struct timespec64 ts;
+
+		if (get_timespec64(&ts, timeout)) {
+			ret = -EFAULT;
+			goto out;
+		}
+		if (!timespec64_valid(&ts)) {
+			ret = -EINVAL;
+			goto out;
+		}
+
+		t = timespec64_to_ktime(ts);
+		tp = &t;
+	}
+
+	/*
+	 * Simple implementation: check each futex value, then wait on
+	 * the first one whose value matches. This is a simplification
+	 * of the full vectorized wait in newer kernels.
+	 */
+	for (i = 0; i < (int)nr_futexes; i++) {
+		u32 __user *uaddr = (u32 __user *)(unsigned long)waitv[i].uaddr;
+		u32 val, expected = (u32)waitv[i].val;
+
+		if (get_user(val, uaddr)) {
+			ret = -EFAULT;
+			goto out;
+		}
+
+		if (val != expected)
+			continue;
+
+		/*
+		 * Value matches - use the existing futex_wait to block on this one.
+		 * Use FUTEX_WAIT with a private hash since we verified the value.
+		 */
+		if (tp) {
+			ret = do_futex(uaddr, FUTEX_WAIT | FUTEX_CLOCK_REALTIME,
+				       expected, tp, NULL, 0, 0);
+		} else {
+			ret = do_futex(uaddr, FUTEX_WAIT, expected,
+				       NULL, NULL, 0, 0);
+		}
+
+		if (ret == 0 || ret == -EAGAIN) {
+			ret = i; /* return index of woken futex */
+			goto out;
+		}
+		/* On timeout or signal, return the error */
+		goto out;
+	}
+
+	/* All futexes had different values - return -EAGAIN */
+	ret = -EAGAIN;
+
+out:
+	if (waitv != stackv)
+		kvfree(waitv);
+	return ret;
+}

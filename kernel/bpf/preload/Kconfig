@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: GPL-2.0
+
+menuconfig BPF_PRELOAD
+bool "Preload BPF file system with kernel specific program and map iterators"
+depends on BPF && BPF_SYSCALL
+help
+  Preload BPF file system with kernel-specific BPF programs.
+
+  If unsure, say N.

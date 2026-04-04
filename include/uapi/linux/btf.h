@@ -72,7 +72,11 @@ struct btf_type {
 #define BTF_KIND_FUNC_PROTO	13	/* Function Proto	*/
 #define BTF_KIND_VAR		14	/* Variable	*/
 #define BTF_KIND_DATASEC	15	/* Section	*/
-#define BTF_KIND_MAX		BTF_KIND_DATASEC
+#define BTF_KIND_FLOAT		16	/* Floating point	*/
+#define BTF_KIND_DECL_TAG	17	/* Decl Tag		*/
+#define BTF_KIND_TYPE_TAG	18	/* Type Tag		*/
+#define BTF_KIND_ENUM64		19	/* Enumeration up to 64-bit values */
+#define BTF_KIND_MAX		BTF_KIND_ENUM64
 #define NR_BTF_KINDS		(BTF_KIND_MAX + 1)
 
 /* For some specific BTF_KIND, "struct btf_type" is immediately
@@ -160,6 +164,24 @@ struct btf_var_secinfo {
 	__u32	type;
 	__u32	offset;
 	__u32	size;
+};
+
+/* BTF_KIND_DECL_TAG is followed by a single "struct btf_decl_tag"
+ * to describe the attribute applied to a function, function parameter,
+ * variable, or struct/union field.
+ */
+struct btf_decl_tag {
+	__s32	component_idx;
+};
+
+/* BTF_KIND_ENUM64 is followed by multiple "struct btf_enum64".
+ * The exact number of btf_enum64 is stored in the vlen (of the
+ * info in "struct btf_type").
+ */
+struct btf_enum64 {
+	__u32	name_off;
+	__u32	val_lo32;
+	__u32	val_hi32;
 };
 
 #endif /* _UAPI__LINUX_BTF_H__ */

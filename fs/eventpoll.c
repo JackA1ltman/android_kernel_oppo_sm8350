@@ -2399,6 +2399,77 @@ COMPAT_SYSCALL_DEFINE6(epoll_pwait, int, epfd,
 }
 #endif
 
+/*
+ * epoll_pwait2 - like epoll_pwait but with struct timespec64 timeout
+ */
+SYSCALL_DEFINE6(epoll_pwait2, int, epfd, struct epoll_event __user *, events,
+		int, maxevents, const struct __kernel_timespec __user *, timeout,
+		const sigset_t __user *, sigmask, size_t, sigsetsize)
+{
+	int error;
+	int timo_ms = -1; /* infinite by default */
+
+	if (timeout) {
+		struct timespec64 ts;
+
+		if (get_timespec64(&ts, timeout))
+			return -EFAULT;
+		/* Convert to milliseconds, clamping to INT_MAX */
+		if (ts.tv_sec >= 0) {
+			u64 ms = (u64)ts.tv_sec * 1000ULL +
+				 (u64)ts.tv_nsec / 1000000ULL;
+			timo_ms = (ms > INT_MAX) ? INT_MAX : (int)ms;
+		} else {
+			return -EINVAL;
+		}
+	}
+
+	error = set_user_sigmask(sigmask, sigsetsize);
+	if (error)
+		return error;
+
+	error = do_epoll_wait(epfd, events, maxevents, timo_ms);
+	restore_saved_sigmask_unless(error == -EINTR);
+
+	return error;
+}
+
+#ifdef CONFIG_COMPAT
+COMPAT_SYSCALL_DEFINE6(epoll_pwait2, int, epfd,
+		       struct epoll_event __user *, events,
+		       int, maxevents,
+		       const struct __kernel_timespec __user *, timeout,
+		       const compat_sigset_t __user *, sigmask,
+		       compat_size_t, sigsetsize)
+{
+	int error;
+	int timo_ms = -1;
+
+	if (timeout) {
+		struct timespec64 ts;
+
+		if (get_timespec64(&ts, timeout))
+			return -EFAULT;
+		if (ts.tv_sec >= 0) {
+			u64 ms = (u64)ts.tv_sec * 1000ULL +
+				 (u64)ts.tv_nsec / 1000000ULL;
+			timo_ms = (ms > INT_MAX) ? INT_MAX : (int)ms;
+		} else {
+			return -EINVAL;
+		}
+	}
+
+	error = set_compat_user_sigmask(sigmask, sigsetsize);
+	if (error)
+		return error;
+
+	error = do_epoll_wait(epfd, events, maxevents, timo_ms);
+	restore_saved_sigmask_unless(error == -EINTR);
+
+	return error;
+}
+#endif
+
 static int __init eventpoll_init(void)
 {
 	struct sysinfo si;

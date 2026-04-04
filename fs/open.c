@@ -9,6 +9,7 @@
 #include <linux/mm.h>
 #include <linux/file.h>
 #include <linux/fdtable.h>
+#include <linux/close_range.h>
 #include <linux/fsnotify.h>
 #include <linux/module.h>
 #include <linux/tty.h>
@@ -1273,6 +1274,15 @@ SYSCALL_DEFINE1(close, unsigned int, fd)
 		retval = -EINTR;
 
 	return retval;
+}
+
+/*
+ * close_range() - Close all file descriptors in a given range.
+ */
+SYSCALL_DEFINE3(close_range, unsigned int, fd, unsigned int, max_fd,
+		unsigned int, flags)
+{
+	return __close_range(fd, max_fd, flags);
 }
 
 /*

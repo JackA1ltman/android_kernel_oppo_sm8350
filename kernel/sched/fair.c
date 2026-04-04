@@ -7626,13 +7626,13 @@ unlock:
 	rcu_read_unlock();
 
 	/*
-	 * Pick the prev CPU, if best energy CPU can't saves at least 6% of
-	 * the energy used by prev_cpu.
+	 * Pick the prev CPU, if best energy CPU can't save energy
+	 * compared to prev_cpu (margin removed per Android 17).
 	 */
 	if (!(idle_cpu(best_energy_cpu) &&
 	    idle_get_state_idx(cpu_rq(best_energy_cpu)) <= 0) &&
 	    (prev_delta != ULONG_MAX) && (best_energy_cpu != prev_cpu)  &&
-	    ((prev_delta - best_delta) <= prev_delta >> 4) &&
+	    (best_delta >= prev_delta) &&
 	    (capacity_orig_of(prev_cpu) <= capacity_orig_of(start_cpu)))
 		best_energy_cpu = prev_cpu;
 
@@ -7780,12 +7780,12 @@ unlock:
 		return best_idle_cpu >= 0 ?
 			best_idle_cpu : max_spare_cap_cpu_ls;
 	/*
-	 * Pick the best CPU if prev_cpu cannot be used, or if it saves at
-	 * least 6% of the energy used by prev_cpu.
+	 * Pick the best CPU if prev_cpu cannot be used, or if it saves
+	 * any energy compared to prev_cpu (margin removed per Android 17).
 	 */
 	if (prev_delta == ULONG_MAX)
 		return best_energy_cpu;
-	if ((prev_delta - best_delta) > ((prev_delta + base_energy) >> 4))
+	if (best_delta < prev_delta)
 		return best_energy_cpu;
 	return prev_cpu;
 fail:
